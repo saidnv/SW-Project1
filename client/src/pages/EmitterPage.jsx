@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { DISPLAY_MEDIA_CONSTRAINTS } from '../config/webrtc'
 import { useSignaling } from '../hooks/useSignaling'
 import { useWebRTC } from '../hooks/useWebRTC'
@@ -193,6 +194,17 @@ export default function EmitterPage() {
               : 'Al iniciar se generará un enlace único para esta sesión.'}
           </p>
         </section>
+
+        <Link
+          to="/finanzas"
+          className="mt-6 rounded-2xl border border-teal-500/30 bg-teal-500/10 p-5 transition hover:border-teal-400/60 hover:bg-teal-500/15"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400">Nuevo sistema</p>
+          <h2 className="mt-2 text-lg font-semibold text-white">Finanzas personales · Kabin</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            Deudas, pagos, ingresos y ahorros en soles peruanos (S/). Entra con un PIN de 4 dígitos.
+          </p>
+        </Link>
       </div>
     </div>
   )

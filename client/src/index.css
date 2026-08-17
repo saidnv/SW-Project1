@@ -4,3 +4,164 @@ body {
   margin: 0;
   min-height: 100svh;
 }
+
+.finanzas-app {
+  --fnz-bg: #f2f2f7;
+  --fnz-card: #ffffff;
+  --fnz-text: #1c1c1e;
+  --fnz-muted: #8e8e93;
+  --fnz-accent: #007aff;
+  --fnz-accent-soft: rgba(0, 122, 255, 0.1);
+  --fnz-danger: #ff3b30;
+  --fnz-success: #34c759;
+  --fnz-warn: #ff9500;
+  --fnz-input: #f2f2f7;
+  --fnz-line: #f4f4f5;
+  --fnz-avatar-from: #007aff;
+  --fnz-avatar-to: #64d2ff;
+  --fnz-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px rgba(15, 23, 42, 0.05);
+  --fnz-focus: 0 0 0 3px rgba(0, 122, 255, 0.18);
+  --fnz-btn-shadow: 0 6px 16px rgba(0, 122, 255, 0.25);
+
+  min-height: 100svh;
+  color: var(--fnz-text);
+  background: var(--fnz-bg);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background-color 0.55s ease,
+    color 0.4s ease;
+}
+
+.finanzas-app[data-theme='kitty'] {
+  --fnz-bg: #f2f2f7;
+  --fnz-card: #ffffff;
+  --fnz-text: #1c1c1e;
+  --fnz-muted: #8e8e93;
+  --fnz-accent: #ee1d6d;
+  --fnz-accent-soft: rgba(238, 29, 109, 0.12);
+  --fnz-danger: #e11d48;
+  --fnz-success: #22c55e;
+  --fnz-warn: #f4b942;
+  --fnz-input: #f2f2f7;
+  --fnz-line: #f4f4f5;
+  --fnz-avatar-from: #ee1d6d;
+  --fnz-avatar-to: #ee1d6d;
+  --fnz-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px rgba(15, 23, 42, 0.05);
+  --fnz-focus: 0 0 0 3px rgba(238, 29, 109, 0.2);
+  --fnz-btn-shadow: 0 8px 18px rgba(238, 29, 109, 0.22);
+}
+
+.finanzas-app input,
+.finanzas-app select,
+.finanzas-app textarea,
+.finanzas-app button {
+  font-family: inherit;
+}
+
+.finanzas-app input:focus,
+.finanzas-app select:focus,
+.finanzas-app textarea:focus {
+  box-shadow: var(--fnz-focus);
+}
+
+@keyframes fnz-pop {
+  0% {
+    transform: scale(0.4) rotate(-18deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.12) rotate(8deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes fnz-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes fnz-sparkle {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fnz-wash {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.fnz-float {
+  animation: fnz-float 3.6s ease-in-out infinite;
+}
+
+.fnz-pop {
+  animation: fnz-pop 0.7s cubic-bezier(0.22, 1.4, 0.36, 1) both;
+}
+
+.fnz-wash {
+  animation: fnz-wash 0.98s ease forwards;
+}
+
+@keyframes fnz-melody-in {
+  0% {
+    opacity: 0;
+    transform: translate(24px, 28px) scale(0.82);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(0, -6px) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes fnz-heart {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.6);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.8);
+  }
+}
+
+.fnz-melody-in {
+  animation: fnz-melody-in 0.7s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+.fnz-heart {
+  animation: fnz-heart 1.4s ease-in-out infinite;
+  color: #ee1d6d;
+}
