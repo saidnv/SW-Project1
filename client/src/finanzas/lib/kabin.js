@@ -55,6 +55,25 @@ export function getGuideTitle(section) {
   return SECTION_TITLES[section] ?? 'Guía'
 }
 
+export function getKabinTip(section) {
+  const tips = {
+    resumen: 'Completa deudas, ingresos y pagos para ver tu remanente.',
+    creditos: 'Registra cada línea con nombre y monto disponible.',
+    deudas: 'Los pagos marcados como pagados bajan la deuda.',
+    pagos: 'Marca Pagado solo cuando salga el dinero.',
+    ingresos: 'Registra sueldos e ingresos del mes en soles.',
+    ahorros: 'Define meta total y monto actual de cada ahorro.',
+    ajustes: 'El tema se guarda en este navegador.',
+  }
+
+  return tips[section] ?? tips.resumen
+}
+
+export function getPrimaryKabinMessage(messages) {
+  if (!messages?.length) return null
+  return messages.find((item) => item.important) ?? messages[0]
+}
+
 export function getKabinAdvice(data, persona = 'Kabin') {
   const { creditos, deudas, pagos, ingresos, ahorros } = data
   const melody = persona === 'My Melody'
@@ -78,7 +97,7 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       title: melody ? '¡Hola!' : 'Bienvenido',
       body: melody
         ? 'Soy My Melody. Te voy a acompañar con cariño para ordenar tus soles. Empieza por deudas, pagos e ingresos. Cuando algo sea importante, vengo a contártelo.'
-        : 'Soy Kabin, tu guía. Completa deudas, pagos e ingresos para darte recomendaciones en soles (S/).',
+        : 'Completa deudas, pagos e ingresos para empezar.',
     })
     return { remainder, totalIngresos, totalPagos, messages }
   }
@@ -89,17 +108,17 @@ export function getKabinAdvice(data, persona = 'Kabin') {
     if (totalAhorros > 0) supports.push(`tienes ${formatSoles(totalAhorros)} en ahorros`)
     if (totalCreditos > 0) supports.push(`hay ${formatSoles(totalCreditos)} en líneas de crédito`)
     const help = supports.length
-      ? `Para cubrir el hueco, ${supports.join(' y ')}.`
-      : 'Aún no hay ahorros ni líneas de crédito registradas para cubrir el hueco.'
+      ? `Revisa ${supports.join(' y ')}.`
+      : 'No hay ahorros ni créditos registrados.'
 
     messages.push({
       id: `deficit-${month}`,
       tone: 'alert',
       important: true,
-      title: melody ? 'Este mes se puso apretado' : 'Este mes hay déficit',
+      title: melody ? 'Este mes se puso apretado' : 'Déficit este mes',
       body: melody
         ? `Los pagos (${formatSoles(totalPagos)}) superan los ingresos (${formatSoles(totalIngresos)}) por ${formatSoles(deficit)}. Tranquila, lo vemos juntas. ${help}`
-        : `Los pagos (${formatSoles(totalPagos)}) superan los ingresos (${formatSoles(totalIngresos)}) por ${formatSoles(deficit)}. ${help}`,
+        : `Te faltan ${formatSoles(deficit)}. Pagos ${formatSoles(totalPagos)} · ingresos ${formatSoles(totalIngresos)}. ${help}`,
     })
   } else if (totalIngresos > 0 && remainder <= totalIngresos * 0.1) {
     const grouped = new Map()
@@ -118,7 +137,7 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       title: melody ? 'Casi no queda para ahorrar' : 'El remanente es bajo para ahorrar',
       body: melody
         ? `Te quedan ${formatSoles(remainder)} de ${formatSoles(totalIngresos)}. ${why} El próximo mes, baja un poquito ese gasto y guarda un monto apenas entre el sueldo. Vas muy bien: ya estás midiendo tu dinero.`
-        : `Te quedan ${formatSoles(remainder)} de ${formatSoles(totalIngresos)}. ${why} Para el próximo mes, baja primero ese gasto y deja un monto fijo de ahorro apenas entre el sueldo. Vas bien: ya estás midiendo el dinero.`,
+        : `Quedan ${formatSoles(remainder)} de ${formatSoles(totalIngresos)}. ${why}`,
     })
   } else if (remainder > 0) {
     messages.push({
@@ -128,7 +147,7 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       title: melody ? '¡Te quedó un ahorro posible!' : 'Hay remanente',
       body: melody
         ? `Después de pagar, te quedan ${formatSoles(remainder)}. Si quieres, lo mandamos a una meta de ahorro. Tú decides.`
-        : `Después de pagar, te quedan ${formatSoles(remainder)}. Puedes enviarlo a una meta de ahorro o dejarlo sin asignar.`,
+        : `Te quedan ${formatSoles(remainder)} después de pagar.`,
     })
   }
 
@@ -141,7 +160,7 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       title: melody ? 'Una deuda para cuidar' : 'Deuda a vigilar',
       body: melody
         ? `La deuda más alta ahora es “${biggest.name}”, con ${formatSoles(biggest.amount)} pendientes. Con calma, pago a pago.`
-        : `La deuda más alta ahora es “${biggest.name}” con ${formatSoles(biggest.amount)} pendientes.`,
+        : `Mayor deuda: “${biggest.name}” (${formatSoles(biggest.amount)}).`,
     })
   }
 

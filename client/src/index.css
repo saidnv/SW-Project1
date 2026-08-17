@@ -165,3 +165,14 @@ body {
   animation: fnz-heart 1.4s ease-in-out infinite;
   color: #ee1d6d;
 }
+
+.fnz-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.fnz-scroll-x::-webkit-scrollbar {
+  display: none;
+}

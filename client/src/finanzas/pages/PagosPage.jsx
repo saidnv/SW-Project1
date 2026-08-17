@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AddFormPanel from '../components/AddFormPanel'
 import AmountBadge from '../components/AmountBadge'
 import Field, { inputClass } from '../components/Field'
 import HistoryList from '../components/HistoryList'
@@ -40,12 +41,19 @@ export default function PagosPage() {
   const deudas = account.data.deudas
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
+  const [formOpen, setFormOpen] = useState(false)
   const month = currentMonthKey()
   const ofMonth = items.filter((item) => inMonth(item.createdAt, month))
   const amounts = ofMonth.map((item) => item.amount)
 
   function selectedDebtName(deudaId) {
     return deudas.find((item) => item.id === deudaId)?.name ?? ''
+  }
+
+  function closeForm() {
+    setFormOpen(false)
+    setEditingId(null)
+    setForm(emptyForm)
   }
 
   function submit(event) {
@@ -56,11 +64,10 @@ export default function PagosPage() {
     if (!name || amount < 0) return
     if (editingId) {
       updatePago(editingId, { name, amount, deudaId })
-      setEditingId(null)
     } else {
       addPago({ name, amount, deudaId })
     }
-    setForm(emptyForm)
+    closeForm()
   }
 
   function startEdit(item) {
@@ -71,6 +78,7 @@ export default function PagosPage() {
       deudaId: item.deudaId || '',
       manual: !item.deudaId,
     })
+    setFormOpen(true)
   }
 
   return (
@@ -91,45 +99,59 @@ export default function PagosPage() {
         }
       />
 
-      <form onSubmit={submit} className={`${card} space-y-3`}>
-        <p className="text-[15px] text-[var(--fnz-muted)]">
-          Al crear el pago queda en pendiente. Márcalo como pagado cuando salga el dinero.
-        </p>
-        <label className="flex items-center gap-2 text-[15px] text-[var(--fnz-text)]">
-          <input
-            type="checkbox"
-            checked={form.manual}
-            onChange={(e) => setForm({ ...form, manual: e.target.checked, deudaId: '' })}
-          />
-          Ingresar nombre de forma manual
-        </label>
-        {form.manual ? (
-          <Field label="Tipo de deuda o nombre">
-            <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </Field>
-        ) : (
-          <Field label="Deuda (desde deudas totales)">
-            <select className={inputClass} value={form.deudaId} onChange={(e) => setForm({ ...form, deudaId: e.target.value })}>
-              <option value="">Selecciona una deuda</option>
-              {deudas.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} · pendiente {formatSoles(item.amount)}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <Field label="Monto del pago (S/)">
-            <input className={inputClass} inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-          </Field>
-          <div className="flex items-end">
-            <button type="submit" className={`${btnPrimary} w-full`}>
-              {editingId ? 'Guardar' : 'Crear pago'}
-            </button>
+      <AddFormPanel
+        open={formOpen}
+        editing={Boolean(editingId)}
+        addLabel="Crear pago"
+        editLabel="Editar pago"
+        onOpen={() => setFormOpen(true)}
+        onClose={closeForm}
+      >
+        <form onSubmit={submit} className="space-y-3">
+          <p className="text-[15px] text-[var(--fnz-muted)]">
+            Al crear el pago queda en pendiente. Márcalo como pagado cuando salga el dinero.
+          </p>
+          <label className="flex items-center gap-2 text-[15px] text-[var(--fnz-text)]">
+            <input
+              type="checkbox"
+              checked={form.manual}
+              onChange={(e) => setForm({ ...form, manual: e.target.checked, deudaId: '' })}
+            />
+            Ingresar nombre de forma manual
+          </label>
+          {form.manual ? (
+            <Field label="Tipo de deuda o nombre">
+              <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </Field>
+          ) : (
+            <Field label="Deuda (desde deudas totales)">
+              <select className={inputClass} value={form.deudaId} onChange={(e) => setForm({ ...form, deudaId: e.target.value })}>
+                <option value="">Selecciona una deuda</option>
+                {deudas.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · pendiente {formatSoles(item.amount)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+            <Field label="Monto del pago (S/)">
+              <input className={inputClass} inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+            </Field>
+            <div className="flex items-end gap-2 sm:flex-col sm:items-stretch">
+              <button type="submit" className={`${btnPrimary} w-full`}>
+                {editingId ? 'Guardar' : 'Crear pago'}
+              </button>
+              {editingId && (
+                <button type="button" onClick={closeForm} className="w-full rounded-full px-4 py-2.5 text-[15px] font-medium text-[var(--fnz-muted)]">
+                  Cancelar
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </AddFormPanel>
 
       <ul className="space-y-3">
         {items.map((item) => {

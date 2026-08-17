@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AddFormPanel from '../components/AddFormPanel'
 import Field, { inputClass } from '../components/Field'
 import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
@@ -37,7 +38,15 @@ export default function AhorrosPage() {
   const items = account.data.ahorros
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
+  const [formOpen, setFormOpen] = useState(false)
   const [error, setError] = useState('')
+
+  function closeForm() {
+    setFormOpen(false)
+    setEditingId(null)
+    setForm(emptyForm)
+    setError('')
+  }
 
   async function submit(event) {
     event.preventDefault()
@@ -55,11 +64,10 @@ export default function AhorrosPage() {
     }
     if (editingId) {
       updateAhorro(editingId, payload)
-      setEditingId(null)
     } else {
       addAhorro(payload)
     }
-    setForm(emptyForm)
+    closeForm()
   }
 
   function startEdit(item) {
@@ -72,6 +80,7 @@ export default function AhorrosPage() {
       link: item.link || '',
       image: item.image || '',
     })
+    setFormOpen(true)
   }
 
   async function onImage(event) {
@@ -90,35 +99,49 @@ export default function AhorrosPage() {
         subtitle="Metas en soles. Ejemplos: viaje, casa, auto, PC, ahorros futuros."
       />
 
-      <form onSubmit={submit} className={`${card} grid gap-3 sm:grid-cols-2`}>
-        <Field label="Tipo o nombre">
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </Field>
-        <Field label="Monto actual (S/)">
-          <input className={inputClass} inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-        </Field>
-        <Field label="Meta total (S/)">
-          <input className={inputClass} inputMode="decimal" value={form.goalAmount} onChange={(e) => setForm({ ...form, goalAmount: e.target.value })} />
-        </Field>
-        <Field label="Ahorro mensual objetivo (S/)">
-          <input className={inputClass} inputMode="decimal" value={form.monthlyTarget} onChange={(e) => setForm({ ...form, monthlyTarget: e.target.value })} />
-        </Field>
-        <Field label="Enlace">
-          <input className={inputClass} placeholder="https://..." value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} />
-        </Field>
-        <Field label="Imagen de la meta">
-          <input className="block w-full text-[14px] text-[var(--fnz-muted)]" type="file" accept="image/*" onChange={onImage} />
-        </Field>
-        {form.image && (
-          <img src={form.image} alt="" className="h-20 w-20 rounded-2xl object-cover sm:col-span-2" />
-        )}
-        {error && <p className="text-[14px] text-[var(--fnz-danger)] sm:col-span-2">{error}</p>}
-        <div className="sm:col-span-2">
-          <button type="submit" className={btnPrimary}>
-            {editingId ? 'Guardar meta' : 'Agregar meta'}
-          </button>
-        </div>
-      </form>
+      <AddFormPanel
+        open={formOpen}
+        editing={Boolean(editingId)}
+        addLabel="Agregar meta"
+        editLabel="Editar meta"
+        onOpen={() => setFormOpen(true)}
+        onClose={closeForm}
+      >
+        <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
+          <Field label="Tipo o nombre">
+            <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label="Monto actual (S/)">
+            <input className={inputClass} inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+          </Field>
+          <Field label="Meta total (S/)">
+            <input className={inputClass} inputMode="decimal" value={form.goalAmount} onChange={(e) => setForm({ ...form, goalAmount: e.target.value })} />
+          </Field>
+          <Field label="Ahorro mensual objetivo (S/)">
+            <input className={inputClass} inputMode="decimal" value={form.monthlyTarget} onChange={(e) => setForm({ ...form, monthlyTarget: e.target.value })} />
+          </Field>
+          <Field label="Enlace">
+            <input className={inputClass} placeholder="https://..." value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} />
+          </Field>
+          <Field label="Imagen de la meta">
+            <input className="block w-full text-[14px] text-[var(--fnz-muted)]" type="file" accept="image/*" onChange={onImage} />
+          </Field>
+          {form.image && (
+            <img src={form.image} alt="" className="h-20 w-20 rounded-2xl object-cover sm:col-span-2" />
+          )}
+          {error && <p className="text-[14px] text-[var(--fnz-danger)] sm:col-span-2">{error}</p>}
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <button type="submit" className={btnPrimary}>
+              {editingId ? 'Guardar meta' : 'Agregar meta'}
+            </button>
+            {editingId && (
+              <button type="button" onClick={closeForm} className="rounded-full px-5 py-2.5 text-[15px] font-medium text-[var(--fnz-muted)]">
+                Cancelar
+              </button>
+            )}
+          </div>
+        </form>
+      </AddFormPanel>
 
       <ul className="space-y-3">
         {items.map((item) => {
