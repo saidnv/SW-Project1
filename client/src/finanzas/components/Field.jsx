@@ -1,9 +1,9 @@
 export default function Field({ label, children }) {
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-1.5 block text-[13px] font-medium text-[var(--fnz-muted)]">{label}</span>
       {children}
-    </label>
+    </div>
   )
 }
 

@@ -194,3 +194,18 @@ body {
 .fnz-due-pulse {
   animation: fnz-due-pulse 2.4s ease-in-out infinite;
 }
+
+@keyframes fnz-ios-sheet {
+  from {
+    transform: translateY(24px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.fnz-ios-sheet {
+  animation: fnz-ios-sheet 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}

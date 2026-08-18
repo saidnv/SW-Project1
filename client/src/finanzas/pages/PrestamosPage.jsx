@@ -3,6 +3,7 @@ import AddFormPanel from '../components/AddFormPanel'
 import CollectLoanModal from '../components/CollectLoanModal'
 import DeleteLoanModal from '../components/DeleteLoanModal'
 import Field, { inputClass } from '../components/Field'
+import IosDateField from '../components/IosDateField'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, btnSecondary, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
@@ -252,12 +253,10 @@ export default function PrestamosPage() {
             />
           </Field>
           <Field label="Hasta qué fecha">
-            <input
-              className={inputClass}
-              type="date"
-              min={editingId ? undefined : todayInputValue()}
+            <IosDateField
               value={form.dueDate}
-              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+              min={editingId ? undefined : todayInputValue()}
+              onChange={(dueDate) => setForm({ ...form, dueDate })}
             />
           </Field>
           <Field label="Foto o constancia de préstamo">
