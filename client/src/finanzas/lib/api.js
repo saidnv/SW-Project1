@@ -37,7 +37,9 @@ export function clearApiToken() {
 export async function pingApi() {
   try {
     const res = await fetch(`${BASE}/api/health`)
-    return res.ok
+    if (!res.ok) return false
+    const data = await res.json()
+    return data.status === 'ok'
   } catch {
     return false
   }
