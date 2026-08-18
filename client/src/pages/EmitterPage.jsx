@@ -116,7 +116,10 @@ export default function EmitterPage() {
     <div className="min-h-svh bg-slate-950 text-slate-100">
       <div className="mx-auto flex min-h-svh max-w-2xl flex-col px-6 py-12">
         <header className="mb-10">
-          <p className="text-sm font-medium uppercase tracking-widest text-indigo-400">
+          <Link to="/" className="text-sm font-medium text-indigo-400 hover:text-indigo-300">
+            ← Inicio
+          </Link>
+          <p className="mt-4 text-sm font-medium uppercase tracking-widest text-indigo-400">
             Share Window
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
@@ -194,17 +197,6 @@ export default function EmitterPage() {
               : 'Al iniciar se generará un enlace único para esta sesión.'}
           </p>
         </section>
-
-        <Link
-          to="/finanzas"
-          className="mt-6 rounded-2xl border border-teal-500/30 bg-teal-500/10 p-5 transition hover:border-teal-400/60 hover:bg-teal-500/15"
-        >
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-400">Nuevo sistema</p>
-          <h2 className="mt-2 text-lg font-semibold text-white">Finanzas personales · Kabin</h2>
-          <p className="mt-2 text-sm text-slate-400">
-            Deudas, pagos, ingresos y ahorros en soles peruanos (S/). Entra con un PIN de 4 dígitos.
-          </p>
-        </Link>
       </div>
     </div>
   )

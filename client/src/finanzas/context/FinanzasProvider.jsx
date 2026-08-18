@@ -1,9 +1,19 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { currentMonthKey, inMonth, nowIso } from '../lib/dates'
 import { createId } from '../lib/ids'
 import { getKabinAdvice } from '../lib/kabin'
 import { sumAmounts } from '../lib/money'
 import { isPagoPaid, paidPagos } from '../lib/pagos'
+import {
+  clearApiToken,
+  fetchMe,
+  isLedgerEmpty,
+  loginAccount,
+  logoutAccount,
+  pingApi,
+  registerAccount,
+  saveLedger,
+} from '../lib/api'
 import {
   emptyLedger,
   loadSessionId,
@@ -23,16 +33,36 @@ function cloneLedger(ledger) {
   return structuredClone(ledger)
 }
 
+function localAccountByUsername(username) {
+  return loadStore().accounts.find(
+    (item) => item.username.toLowerCase() === String(username || '').toLowerCase(),
+  )
+}
+
 export default function FinanzasProvider({ children }) {
   const [store, setStore] = useState(loadStore)
   const [sessionId, setSessionId] = useState(loadSessionId)
   const [surplusPrompt, setSurplusPrompt] = useState(null)
+  const [ready, setReady] = useState(false)
+  const [usingApi, setUsingApi] = useState(false)
+  const usingApiRef = useRef(false)
+  const saveQueue = useRef(Promise.resolve())
 
   const persist = useCallback((nextStore, nextSessionId = sessionId) => {
     setStore(nextStore)
-    saveStore(nextStore)
     setSessionId(nextSessionId)
     saveSessionId(nextSessionId)
+    if (!usingApiRef.current) {
+      saveStore(nextStore)
+      return
+    }
+    const account = nextStore.accounts.find((item) => item.id === nextSessionId)
+    if (!account) return
+    saveQueue.current = saveQueue.current
+      .then(() => saveLedger(account.data))
+      .catch((error) => {
+        console.error(error)
+      })
   }, [sessionId])
 
   const account = store.accounts.find((item) => item.id === sessionId) ?? null
@@ -56,13 +86,25 @@ export default function FinanzasProvider({ children }) {
   )
 
   const createAccount = useCallback(
-    (username, pin) => {
-      if (store.accounts.length >= MAX_ACCOUNTS) {
-        return { ok: false, error: `Máximo de ${MAX_ACCOUNTS} cuentas.` }
-      }
+    async (username, pin) => {
       const name = username.trim()
       if (!name) return { ok: false, error: 'Escribe un nombre de usuario.' }
       if (!/^\d{4}$/.test(pin)) return { ok: false, error: 'El PIN debe tener 4 dígitos.' }
+
+      if (usingApiRef.current) {
+        try {
+          const local = localAccountByUsername(name)
+          const payload = await registerAccount(name, pin, local?.data)
+          persist({ accounts: [payload.account] }, payload.account.id)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error.message }
+        }
+      }
+
+      if (store.accounts.length >= MAX_ACCOUNTS) {
+        return { ok: false, error: `Máximo de ${MAX_ACCOUNTS} cuentas.` }
+      }
       if (store.accounts.some((item) => item.username.toLowerCase() === name.toLowerCase())) {
         return { ok: false, error: 'Ese nombre ya existe.' }
       }
@@ -81,8 +123,28 @@ export default function FinanzasProvider({ children }) {
   )
 
   const login = useCallback(
-    (accountId, pin) => {
-      const found = store.accounts.find((item) => item.id === accountId)
+    async (accountIdOrUsername, pin) => {
+      if (usingApiRef.current) {
+        try {
+          const payload = await loginAccount(accountIdOrUsername, pin)
+          let account = payload.account
+          const local = localAccountByUsername(account.username)
+          if (local?.data && isLedgerEmpty(account.data) && !isLedgerEmpty(local.data)) {
+            const saved = await saveLedger(local.data)
+            account = saved.account
+          }
+          persist({ accounts: [account] }, account.id)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error.message }
+        }
+      }
+
+      const found =
+        store.accounts.find((item) => item.id === accountIdOrUsername) ||
+        store.accounts.find(
+          (item) => item.username.toLowerCase() === String(accountIdOrUsername).toLowerCase(),
+        )
       if (!found) return { ok: false, error: 'Cuenta no encontrada.' }
       if (found.pin !== pin) return { ok: false, error: 'PIN incorrecto.' }
       persist(store, found.id)
@@ -92,8 +154,41 @@ export default function FinanzasProvider({ children }) {
   )
 
   const logout = useCallback(() => {
+    if (usingApiRef.current) {
+      logoutAccount().catch(() => {})
+      setStore({ accounts: [] })
+    }
     setSessionId(null)
     saveSessionId(null)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function boot() {
+      const apiUp = await pingApi()
+      if (cancelled) return
+      if (apiUp) {
+        usingApiRef.current = true
+        setUsingApi(true)
+        try {
+          const payload = await fetchMe()
+          if (cancelled) return
+          setStore({ accounts: [payload.account] })
+          setSessionId(payload.account.id)
+          saveSessionId(payload.account.id)
+        } catch {
+          clearApiToken()
+          setStore({ accounts: [] })
+          setSessionId(null)
+          saveSessionId(null)
+        }
+      }
+      setReady(true)
+    }
+    boot()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const addCredito = useCallback(
@@ -554,6 +649,8 @@ export default function FinanzasProvider({ children }) {
     accounts: store.accounts,
     account,
     loggedIn: Boolean(account),
+    ready,
+    usingApi,
     surplusPrompt,
     totals,
     kabin,

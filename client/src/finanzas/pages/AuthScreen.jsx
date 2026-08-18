@@ -5,22 +5,30 @@ import Field, { inputClass } from '../components/Field'
 import { btnPrimary, card } from '../components/ui'
 
 export default function AuthScreen() {
-  const { accounts, createAccount, login } = useFinanzas()
+  const { accounts, createAccount, login, usingApi } = useFinanzas()
   const [mode, setMode] = useState(accounts.length ? 'login' : 'create')
   const [username, setUsername] = useState('')
   const [pin, setPin] = useState('')
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  function handleCreate(event) {
+  async function handleCreate(event) {
     event.preventDefault()
-    const result = createAccount(username, pin)
+    setBusy(true)
+    setError('')
+    const result = await createAccount(username, pin)
+    setBusy(false)
     if (!result.ok) setError(result.error)
   }
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     event.preventDefault()
-    const result = login(accountId, pin)
+    setBusy(true)
+    setError('')
+    const identity = usingApi ? username : accountId
+    const result = await login(identity, pin)
+    setBusy(false)
     if (!result.ok) setError(result.error)
   }
 
@@ -31,6 +39,9 @@ export default function AuthScreen() {
       <p className="mt-2 text-[15px] leading-relaxed text-[var(--fnz-muted)]">
         Entra con un nombre y un PIN de 4 dígitos. Máximo {MAX_ACCOUNTS} cuentas. Los montos se
         manejan en soles peruanos (S/).
+        {usingApi
+          ? ' Tus datos se guardan en la nube y los verás en cualquier dispositivo.'
+          : ' Ahora mismo se guardan en este navegador porque la API no está conectada.'}
       </p>
 
       <div className="mt-5 grid grid-cols-2 rounded-full bg-[var(--fnz-input)] p-1">
@@ -50,7 +61,7 @@ export default function AuthScreen() {
             setMode('create')
             setError('')
           }}
-          disabled={accounts.length >= MAX_ACCOUNTS}
+          disabled={!usingApi && accounts.length >= MAX_ACCOUNTS}
           className={`rounded-full px-3 py-2 text-[14px] font-medium disabled:opacity-40 ${mode === 'create' ? 'bg-[var(--fnz-card)] text-[var(--fnz-text)] shadow-sm' : 'text-[var(--fnz-muted)]'}`}
         >
           Crear cuenta
@@ -59,19 +70,25 @@ export default function AuthScreen() {
 
       {mode === 'login' ? (
         <form className="mt-5 space-y-4" onSubmit={handleLogin}>
-          {accounts.length === 0 ? (
+          {!usingApi && accounts.length === 0 ? (
             <p className="text-[15px] text-[var(--fnz-muted)]">Aún no hay cuentas. Crea la primera.</p>
           ) : (
             <>
-              <Field label="Cuenta">
-                <select className={inputClass} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-                  {accounts.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.username}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {usingApi ? (
+                <Field label="Nombre de usuario">
+                  <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} />
+                </Field>
+              ) : (
+                <Field label="Cuenta">
+                  <select className={inputClass} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                    {accounts.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.username}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="PIN de 4 dígitos">
                 <input
                   className={inputClass}
@@ -81,8 +98,8 @@ export default function AuthScreen() {
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                 />
               </Field>
-              <button type="submit" className={`${btnPrimary} w-full`}>
-                Entrar
+              <button type="submit" disabled={busy} className={`${btnPrimary} w-full disabled:opacity-60`}>
+                {busy ? 'Entrando…' : 'Entrar'}
               </button>
             </>
           )}
@@ -101,8 +118,8 @@ export default function AuthScreen() {
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
             />
           </Field>
-          <button type="submit" className={`${btnPrimary} w-full`}>
-            Crear y entrar
+          <button type="submit" disabled={busy} className={`${btnPrimary} w-full disabled:opacity-60`}>
+            {busy ? 'Creando…' : 'Crear y entrar'}
           </button>
         </form>
       )}
@@ -112,7 +129,9 @@ export default function AuthScreen() {
       )}
 
       <p className="mt-4 text-[12px] text-[var(--fnz-muted)]">
-        {accounts.length}/{MAX_ACCOUNTS} cuentas creadas. El PIN se guarda solo en este navegador.
+        {usingApi
+          ? `Hasta ${MAX_ACCOUNTS} cuentas. El PIN viaja cifrado hacia el servidor.`
+          : `${accounts.length}/${MAX_ACCOUNTS} cuentas creadas. El PIN se guarda solo en este navegador.`}
       </p>
     </div>
   )

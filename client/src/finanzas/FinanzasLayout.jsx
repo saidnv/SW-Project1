@@ -135,7 +135,7 @@ function MobileMenu({ kitty, onClose, onLogout }) {
           Ajustes y temas
         </Link>
         <Link to="/" onClick={onClose} className="block px-4 py-2.5 text-[15px] font-medium text-[var(--fnz-accent)]">
-          Ir a compartir pantalla
+          Volver al inicio
         </Link>
         <button
           type="button"
@@ -162,7 +162,7 @@ function MobileMenu({ kitty, onClose, onLogout }) {
 }
 
 export default function FinanzasLayout() {
-  const { loggedIn, account, logout } = useFinanzas()
+  const { loggedIn, account, logout, ready } = useFinanzas()
   const { theme } = useTheme()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -174,12 +174,20 @@ export default function FinanzasLayout() {
     setMenuOpen(false)
   }, [location.pathname])
 
+  if (!ready) {
+    return (
+      <div className="finanzas-app grid min-h-svh place-items-center px-4" data-theme={theme}>
+        <p className="text-[15px] text-[var(--fnz-muted)]">Cargando finanzas…</p>
+      </div>
+    )
+  }
+
   if (!loggedIn) {
     return (
       <div className="finanzas-app px-4 py-10" data-theme={theme}>
         <div className="mx-auto mb-6 max-w-md">
           <Link to="/" className="text-[15px] font-medium text-[var(--fnz-accent)]">
-            ← Share Window
+            ← Inicio
           </Link>
         </div>
         <AuthScreen />
@@ -254,7 +262,7 @@ export default function FinanzasLayout() {
               Ajustes y temas
             </Link>
             <Link to="/" className="text-[15px] font-medium text-[var(--fnz-accent)]">
-              Ir a compartir pantalla
+              Volver al inicio
             </Link>
             <button type="button" onClick={logout} className="text-left text-[15px] font-medium text-[var(--fnz-danger)]">
               Cerrar sesión
