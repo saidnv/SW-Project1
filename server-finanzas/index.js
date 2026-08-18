@@ -28,7 +28,47 @@ function publicAccount(row) {
     id: row.id,
     username: row.username,
     createdAt: row.created_at,
+    isAdmin: isAdminUsername(row.username),
     data: row.data && typeof row.data === 'object' ? row.data : emptyLedger,
+  }
+}
+
+function isAdminUsername(name) {
+  return String(name || '').trim().toLowerCase() === 'robinson'
+}
+
+const ADMIN_USERNAME = 'robinson'
+const ADMIN_PIN = process.env.ADMIN_PIN || '2524'
+
+async function ensureAdmin() {
+  const pinHash = await bcrypt.hash(ADMIN_PIN, 10)
+  const exists = await pool.query('SELECT id FROM accounts WHERE lower(username) = lower($1)', [ADMIN_USERNAME])
+  if (exists.rowCount) {
+    await pool.query('UPDATE accounts SET pin_hash = $1 WHERE id = $2', [pinHash, exists.rows[0].id])
+    return
+  }
+  await pool.query(
+    `INSERT INTO accounts (username, pin_hash, data)
+     VALUES ($1, $2, $3::jsonb)`,
+    [ADMIN_USERNAME, pinHash, JSON.stringify(emptyLedger)],
+  )
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const account = await accountFromToken(req)
+    if (!account) {
+      res.status(401).json({ ok: false, error: 'Sesión no iniciada.' })
+      return
+    }
+    if (!isAdminUsername(account.username)) {
+      res.status(403).json({ ok: false, error: 'Solo el administrador puede hacer esto.' })
+      return
+    }
+    req.account = account
+    next()
+  } catch (error) {
+    next(error)
   }
 }
 
@@ -111,6 +151,11 @@ app.post('/api/auth/register', async (req, res, next) => {
     const pin = String(req.body?.pin || '')
     const imported = normalizeLedger(req.body?.data)
 
+    if (isAdminUsername(username)) {
+      res.status(400).json({ ok: false, error: 'Ese nombre está reservado.' })
+      return
+    }
+
     if (!username) {
       res.status(400).json({ ok: false, error: 'Escribe un nombre de usuario.' })
       return
@@ -183,6 +228,45 @@ app.get('/api/me', requireAccount, (req, res) => {
   res.json({ ok: true, account: publicAccount(req.account) })
 })
 
+app.get('/api/admin/accounts', requireAdmin, async (_req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, created_at FROM accounts ORDER BY created_at ASC',
+    )
+    res.json({
+      ok: true,
+      accounts: rows.map((row) => ({
+        id: row.id,
+        username: row.username,
+        createdAt: row.created_at,
+        isAdmin: isAdminUsername(row.username),
+      })),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/admin/accounts/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = String(req.params.id || '')
+    const { rows } = await pool.query('SELECT id, username FROM accounts WHERE id = $1', [id])
+    const target = rows[0]
+    if (!target) {
+      res.status(404).json({ ok: false, error: 'Usuario no encontrado.' })
+      return
+    }
+    if (isAdminUsername(target.username) || target.id === req.account.id) {
+      res.status(400).json({ ok: false, error: 'No puedes eliminar al administrador.' })
+      return
+    }
+    await pool.query('DELETE FROM accounts WHERE id = $1', [id])
+    res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.put('/api/ledger', requireAccount, async (req, res, next) => {
   try {
     const data = normalizeLedger(req.body?.data)
@@ -204,6 +288,7 @@ app.use((error, _req, res, _next) => {
 
 async function start() {
   await ensureSchema()
+  await ensureAdmin()
   app.listen(PORT, () => {
     console.log(`Kabin finanzas API en http://localhost:${PORT}`)
   })

@@ -84,3 +84,11 @@ export function isLedgerEmpty(data) {
     (key) => !Array.isArray(data[key]) || data[key].length === 0,
   )
 }
+
+export function fetchAdminAccounts() {
+  return request('/api/admin/accounts')
+}
+
+export function deleteAdminAccount(id) {
+  return request(`/api/admin/accounts/${id}`, { method: 'DELETE' })
+}

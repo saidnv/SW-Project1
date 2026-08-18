@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ADMIN_PIN, ADMIN_USERNAME, isAdminUsername } from '../lib/admin'
 import { currentMonthKey, inMonth, nowIso } from '../lib/dates'
 import { createId } from '../lib/ids'
 import { getKabinAdvice } from '../lib/kabin'
@@ -6,6 +7,7 @@ import { sumAmounts } from '../lib/money'
 import { isPagoPaid, paidPagos } from '../lib/pagos'
 import {
   clearApiToken,
+  fetchAdminAccounts,
   fetchMe,
   isLedgerEmpty,
   loginAccount,
@@ -13,6 +15,7 @@ import {
   pingApi,
   registerAccount,
   saveLedger,
+  deleteAdminAccount,
 } from '../lib/api'
 import {
   emptyLedger,
@@ -37,6 +40,27 @@ function localAccountByUsername(username) {
   return loadStore().accounts.find(
     (item) => item.username.toLowerCase() === String(username || '').toLowerCase(),
   )
+}
+
+function withLocalAdmin(store) {
+  const accounts = store.accounts.map((item) =>
+    isAdminUsername(item.username) ? { ...item, username: ADMIN_USERNAME, pin: ADMIN_PIN } : item,
+  )
+  if (accounts.some((item) => isAdminUsername(item.username))) {
+    return { accounts }
+  }
+  return {
+    accounts: [
+      {
+        id: createId(),
+        username: ADMIN_USERNAME,
+        pin: ADMIN_PIN,
+        createdAt: nowIso(),
+        data: emptyLedger(),
+      },
+      ...accounts,
+    ],
+  }
 }
 
 export default function FinanzasProvider({ children }) {
@@ -90,6 +114,7 @@ export default function FinanzasProvider({ children }) {
       const name = username.trim()
       if (!name) return { ok: false, error: 'Escribe un nombre de usuario.' }
       if (!/^\d{4}$/.test(pin)) return { ok: false, error: 'El PIN debe tener 4 dígitos.' }
+      if (isAdminUsername(name)) return { ok: false, error: 'Ese nombre está reservado.' }
 
       if (usingApiRef.current) {
         try {
@@ -182,6 +207,10 @@ export default function FinanzasProvider({ children }) {
           setSessionId(null)
           saveSessionId(null)
         }
+      } else {
+        const next = withLocalAdmin(loadStore())
+        saveStore(next)
+        setStore(next)
       }
       setReady(true)
     }
@@ -618,6 +647,42 @@ export default function FinanzasProvider({ children }) {
 
   const dismissSurplus = useCallback(() => setSurplusPrompt(null), [])
 
+  const isAdmin = isAdminUsername(account?.username)
+
+  const listUsers = useCallback(async () => {
+    if (usingApiRef.current) {
+      const payload = await fetchAdminAccounts()
+      return payload.accounts || []
+    }
+    return store.accounts.map((item) => ({
+      id: item.id,
+      username: item.username,
+      createdAt: item.createdAt,
+      isAdmin: isAdminUsername(item.username),
+    }))
+  }, [store.accounts])
+
+  const deleteUser = useCallback(
+    async (id) => {
+      if (usingApiRef.current) {
+        try {
+          await deleteAdminAccount(id)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error.message }
+        }
+      }
+      const target = store.accounts.find((item) => item.id === id)
+      if (!target) return { ok: false, error: 'Usuario no encontrado.' }
+      if (isAdminUsername(target.username) || target.id === sessionId) {
+        return { ok: false, error: 'No puedes eliminar al administrador.' }
+      }
+      persist({ accounts: store.accounts.filter((item) => item.id !== id) }, sessionId)
+      return { ok: true }
+    },
+    [persist, sessionId, store.accounts],
+  )
+
   const totals = useMemo(() => {
     const data = account?.data ?? emptyLedger()
     const month = currentMonthKey()
@@ -651,6 +716,7 @@ export default function FinanzasProvider({ children }) {
     loggedIn: Boolean(account),
     ready,
     usingApi,
+    isAdmin,
     surplusPrompt,
     totals,
     kabin,
@@ -675,6 +741,8 @@ export default function FinanzasProvider({ children }) {
     removeAhorro,
     allocateSurplus,
     dismissSurplus,
+    listUsers,
+    deleteUser,
   }
 
   return <FinanzasContext.Provider value={value}>{children}</FinanzasContext.Provider>
