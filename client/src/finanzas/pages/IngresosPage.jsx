@@ -4,19 +4,19 @@ import Field, { inputClass } from '../components/Field'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
-import { currentMonthKey, formatMonthKey, inMonth } from '../lib/dates'
 import { formatSoles, parseAmount, sumAmounts } from '../lib/money'
+import { inPeriod, openPeriod } from '../lib/period'
+import { formatMonthKey } from '../lib/dates'
 
 const emptyForm = { name: '', amount: '' }
 
 export default function IngresosPage() {
   const { account, totals, addIngreso, updateIngreso, removeIngreso } = useFinanzas()
-  const items = account.data.ingresos
+  const period = openPeriod(account.data)
+  const items = account.data.ingresos.filter((item) => inPeriod(item, period))
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
-  const month = currentMonthKey()
-  const ofMonth = items.filter((item) => inMonth(item.createdAt, month))
 
   function closeForm() {
     setFormOpen(false)
@@ -49,7 +49,7 @@ export default function IngresosPage() {
         title="Sueldo o ingresos"
         subtitle={
           <>
-            {formatMonthKey(month)}: ingresos {formatSoles(sumAmounts(ofMonth))} − pagos pagados{' '}
+            {formatMonthKey(period)}: ingresos {formatSoles(sumAmounts(items))} − pagos pagados{' '}
             {formatSoles(totals.pagosMes)} ={' '}
             <span className={`font-semibold ${totals.remainder >= 0 ? 'text-[var(--fnz-success)]' : 'text-[var(--fnz-danger)]'}`}>
               {formatSoles(totals.remainder)}
@@ -103,7 +103,7 @@ export default function IngresosPage() {
             </div>
           </li>
         ))}
-        {!items.length && <p className={empty}>No hay ingresos registrados.</p>}
+        {!items.length && <p className={empty}>No hay ingresos en este mes.</p>}
       </ul>
     </section>
   )

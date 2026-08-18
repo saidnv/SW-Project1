@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT NOT NULL UNIQUE,
   pin_hash TEXT NOT NULL,
-  data JSONB NOT NULL DEFAULT '{"creditos":[],"deudas":[],"pagos":[],"ingresos":[],"ahorros":[],"history":[]}'::jsonb,
+  data JSONB NOT NULL DEFAULT '{"creditos":[],"deudas":[],"pagos":[],"ingresos":[],"ahorros":[],"prestamos":[],"prestamoDisponible":0,"history":[]}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

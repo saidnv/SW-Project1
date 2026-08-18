@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export default function RowMenu({ onEdit, onDelete }) {
+export default function RowMenu({ onEdit, onDelete, tone = 'default' }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
 
@@ -19,7 +19,11 @@ export default function RowMenu({ onEdit, onDelete }) {
         type="button"
         aria-label="Más opciones"
         onClick={() => setOpen((value) => !value)}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--fnz-muted)] transition hover:bg-[var(--fnz-input)] hover:text-[var(--fnz-text)]"
+        className={`flex h-8 w-8 items-center justify-center rounded-full transition ${
+          tone === 'light'
+            ? 'text-white/80 hover:bg-white/15 hover:text-white'
+            : 'text-[var(--fnz-muted)] hover:bg-[var(--fnz-input)] hover:text-[var(--fnz-text)]'
+        }`}
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current">
           <circle cx="5" cy="12" r="1.8" />

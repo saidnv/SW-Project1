@@ -1,25 +1,31 @@
 import { useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import AmountBadge from '../components/AmountBadge'
+import CloseMonthCard from '../components/CloseMonthCard'
 import Field, { inputClass } from '../components/Field'
-import HistoryList from '../components/HistoryList'
+import MonthHistory from '../components/MonthHistory'
+import PlasticCard from '../components/PlasticCard'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
-import { currentMonthKey, formatMonthKey, inMonth } from '../lib/dates'
+import { formatMonthKey } from '../lib/dates'
+import { isTarjeta, kindLabel, kindOf, resolveTarjeta } from '../lib/kinds'
 import { formatSoles, parseAmount } from '../lib/money'
 import { isPagoPaid } from '../lib/pagos'
+import { inPeriod, openPeriod } from '../lib/period'
 
 const emptyForm = { name: '', amount: '', deudaId: '', manual: false }
 
-function PaidSwitch({ paid, onChange }) {
+function PaidSwitch({ paid, onChange, tone = 'default' }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={paid}
       onClick={() => onChange(!paid)}
-      className="flex items-center gap-2 text-[13px] font-medium text-[var(--fnz-text)]"
+      className={`flex items-center gap-2 text-[13px] font-medium ${
+        tone === 'light' ? 'text-white' : 'text-[var(--fnz-text)]'
+      }`}
     >
       <span
         className={`relative h-[31px] w-[51px] rounded-full transition ${paid ? 'bg-[var(--fnz-success)]' : 'bg-[var(--fnz-input)]'}`}
@@ -36,19 +42,22 @@ function PaidSwitch({ paid, onChange }) {
 }
 
 export default function PagosPage() {
-  const { account, totals, addPago, setPagoPaid, updatePago, removePago } = useFinanzas()
-  const items = account.data.pagos
+  const { account, totals, addPago, setPagoPaid, updatePago, removePago, closeMonth } = useFinanzas()
+  const period = openPeriod(account.data)
+  const items = account.data.pagos.filter((item) => inPeriod(item, period))
   const deudas = account.data.deudas
+  const pending = items.filter((item) => !isPagoPaid(item))
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
-  const month = currentMonthKey()
-  const ofMonth = items.filter((item) => inMonth(item.createdAt, month))
-  const amounts = ofMonth.map((item) => item.amount)
+  const amounts = items.map((item) => item.amount)
 
   function selectedDebtName(deudaId) {
     return deudas.find((item) => item.id === deudaId)?.name ?? ''
   }
+
+  const selectedDeuda = deudas.find((item) => item.id === form.deudaId)
+  const selectedTarjeta = selectedDeuda && isTarjeta(selectedDeuda) ? selectedDeuda : null
 
   function closeForm() {
     setFormOpen(false)
@@ -87,7 +96,7 @@ export default function PagosPage() {
         title="Pagos mensuales"
         subtitle={
           <>
-            {formatMonthKey(month)}: pagados{' '}
+            {formatMonthKey(period)}: pagados{' '}
             <span className="font-semibold text-[var(--fnz-success)]">{formatSoles(totals.pagosMes)}</span>
             {totals.pagosPendientesMes > 0 && (
               <>
@@ -97,6 +106,12 @@ export default function PagosPage() {
             )}
           </>
         }
+      />
+
+      <CloseMonthCard
+        periodKey={period}
+        ready={items.length > 0 && pending.length === 0}
+        onCloseMonth={closeMonth}
       />
 
       <AddFormPanel
@@ -120,20 +135,25 @@ export default function PagosPage() {
             Ingresar nombre de forma manual
           </label>
           {form.manual ? (
-            <Field label="Tipo de deuda o nombre">
+            <Field label="Nombre">
               <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
           ) : (
-            <Field label="Deuda (desde deudas totales)">
-              <select className={inputClass} value={form.deudaId} onChange={(e) => setForm({ ...form, deudaId: e.target.value })}>
-                <option value="">Selecciona una deuda</option>
-                {deudas.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · pendiente {formatSoles(item.amount)}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <>
+              <Field label="Deuda (desde deudas totales)">
+                <select className={inputClass} value={form.deudaId} onChange={(e) => setForm({ ...form, deudaId: e.target.value })}>
+                  <option value="">Selecciona una deuda</option>
+                  {deudas.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {kindLabel(kindOf(item))} · pendiente {formatSoles(item.amount)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {selectedTarjeta ? (
+                <PlasticCard name={selectedTarjeta.name} color={selectedTarjeta.color} amount={selectedDeuda?.amount} />
+              ) : null}
+            </>
           )}
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <Field label="Monto del pago (S/)">
@@ -156,6 +176,28 @@ export default function PagosPage() {
       <ul className="space-y-3">
         {items.map((item) => {
           const paid = isPagoPaid(item)
+          const tarjeta = resolveTarjeta(item, deudas)
+          if (tarjeta) {
+            return (
+              <li key={item.id}>
+                <PlasticCard
+                  name={tarjeta.name}
+                  amount={item.amount}
+                  color={tarjeta.color}
+                  actions={<RowMenu tone="light" onEdit={() => startEdit(item)} onDelete={() => removePago(item.id)} />}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <PaidSwitch tone="light" paid={paid} onChange={(next) => setPagoPaid(item.id, next)} />
+                    {paid && item.deudaId ? (
+                      <p className="text-[13px] text-white/80">Descontado {formatSoles(item.appliedAmount || 0)}</p>
+                    ) : !paid && item.deudaId ? (
+                      <p className="text-[13px] text-white/70">Aún no se descuenta</p>
+                    ) : null}
+                  </div>
+                </PlasticCard>
+              </li>
+            )
+          }
           return (
             <li key={item.id} className={card}>
               <div className="flex items-start justify-between gap-3">
@@ -181,12 +223,12 @@ export default function PagosPage() {
             </li>
           )
         })}
-        {!items.length && <p className={empty}>No hay pagos registrados.</p>}
+        {!items.length && <p className={empty}>No hay pagos en este mes.</p>}
       </ul>
 
       <div>
-        <h3 className="mb-3 px-1 text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Historial</h3>
-        <HistoryList items={account.data.history} module="pagos" />
+        <h3 className="mb-3 px-1 text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Historial por mes</h3>
+        <MonthHistory months={account.data.closedMonths} variant="pagos" />
       </div>
     </section>
   )

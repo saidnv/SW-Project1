@@ -20,7 +20,11 @@ const emptyLedger = {
   pagos: [],
   ingresos: [],
   ahorros: [],
+  prestamos: [],
+  prestamoDisponible: 0,
   history: [],
+  closedMonths: [],
+  periodKey: null,
 }
 
 function publicAccount(row) {
@@ -124,7 +128,11 @@ function normalizeLedger(data) {
     pagos: Array.isArray(source.pagos) ? source.pagos : [],
     ingresos: Array.isArray(source.ingresos) ? source.ingresos : [],
     ahorros: Array.isArray(source.ahorros) ? source.ahorros : [],
+    prestamos: Array.isArray(source.prestamos) ? source.prestamos : [],
+    prestamoDisponible: Number(source.prestamoDisponible) || 0,
     history: Array.isArray(source.history) ? source.history.slice(0, 120) : [],
+    closedMonths: Array.isArray(source.closedMonths) ? source.closedMonths : [],
+    periodKey: typeof source.periodKey === 'string' && source.periodKey ? source.periodKey : null,
   }
 }
 

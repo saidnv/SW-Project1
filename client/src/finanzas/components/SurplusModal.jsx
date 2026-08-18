@@ -25,11 +25,10 @@ export default function SurplusModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-[28px] bg-[var(--fnz-card)] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
-        <h2 className="text-center text-[22px] font-semibold text-[var(--fnz-text)]">Hay un remanente</h2>
+        <h2 className="text-center text-[22px] font-semibold text-[var(--fnz-text)]">Sobrante del mes</h2>
         <p className="mt-2 text-center text-[15px] leading-relaxed text-[var(--fnz-muted)]">
-          Después de restar los pagos del mes, te quedan{' '}
-          <span className="font-semibold text-[var(--fnz-text)]">{formatSoles(surplusPrompt.remainder)}</span>.
-          ¿Quieres ahorrarlo o no hacer nada?
+          Te quedan <span className="font-semibold text-[var(--fnz-text)]">{formatSoles(surplusPrompt.remainder)}</span>.
+          ¿Lo pasas a una meta?
         </p>
 
         {ahorros.length > 0 && (
@@ -85,7 +84,7 @@ export default function SurplusModal() {
             onClick={dismissSurplus}
             className="w-full rounded-full px-4 py-2.5 text-[15px] font-medium text-[var(--fnz-muted)]"
           >
-            No hacer nada
+            {surplusPrompt.fromClose ? 'Cerrar sin ahorrar' : 'No hacer nada'}
           </button>
         </div>
       </div>

@@ -9,7 +9,11 @@ export function emptyLedger() {
     pagos: [],
     ingresos: [],
     ahorros: [],
+    prestamos: [],
+    prestamoDisponible: 0,
     history: [],
+    closedMonths: [],
+    periodKey: null,
   }
 }
 

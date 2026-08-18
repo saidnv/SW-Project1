@@ -12,6 +12,7 @@ function sectionFromPath(pathname) {
   if (pathname.includes('/pagos')) return 'pagos'
   if (pathname.includes('/ingresos')) return 'ingresos'
   if (pathname.includes('/ahorros')) return 'ahorros'
+  if (pathname.includes('/prestamos')) return 'prestamos'
   if (pathname.includes('/ajustes')) return 'ajustes'
   return 'resumen'
 }

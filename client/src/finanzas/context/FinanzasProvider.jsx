@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ADMIN_PIN, ADMIN_USERNAME, isAdminUsername } from '../lib/admin'
-import { currentMonthKey, inMonth, nowIso } from '../lib/dates'
+import { addMonths, isMonthCloseWindow, nowIso } from '../lib/dates'
 import { createId } from '../lib/ids'
 import { getKabinAdvice } from '../lib/kabin'
 import { sumAmounts } from '../lib/money'
 import { isPagoPaid, paidPagos } from '../lib/pagos'
+import { hydrateLedger, inPeriod, openPeriod } from '../lib/period'
+import { loanInterestAmount, loanTotal, openLoans, poolAfterRemovingLoan } from '../lib/prestamos'
 import {
   clearApiToken,
   fetchAdminAccounts,
@@ -27,13 +29,125 @@ import {
 } from '../lib/storage'
 import { FinanzasContext } from './FinanzasContext'
 
-function pushHistory(ledger, entry) {
-  const next = [{ id: createId(), at: nowIso(), ...entry }, ...ledger.history]
-  return { ...ledger, history: next.slice(0, 120) }
+function withHydrated(account) {
+  if (!account) return account
+  return { ...account, data: hydrateLedger(account.data) }
 }
 
 function cloneLedger(ledger) {
   return structuredClone(ledger)
+}
+
+function periodRemainder(ledger) {
+  const period = openPeriod(ledger)
+  const ingresos = sumAmounts(ledger.ingresos.filter((row) => inPeriod(row, period)))
+  const pagos = sumAmounts(paidPagos(ledger.pagos.filter((row) => inPeriod(row, period))))
+  return Number((ingresos - pagos).toFixed(2))
+}
+
+function applyMonthClose(ledger) {
+  const period = openPeriod(ledger)
+  const periodPagos = ledger.pagos.filter((row) => inPeriod(row, period))
+  const periodIngresos = ledger.ingresos.filter((row) => inPeriod(row, period))
+  const closedAt = nowIso()
+  const nextKey = addMonths(period, 1)
+  const snapshot = {
+    id: createId(),
+    monthKey: period,
+    closedAt,
+    pagos: periodPagos.map((item) => ({
+      id: item.id,
+      name: item.name,
+      amount: item.amount,
+      deudaId: item.deudaId || null,
+      paid: true,
+      paidAt: item.paidAt || closedAt,
+      appliedAmount: item.appliedAmount || 0,
+      kind: item.kind || null,
+      color: item.color || null,
+    })),
+    deudas: ledger.deudas.map((item) => ({
+      id: item.id,
+      name: item.name,
+      amount: item.amount,
+      originalAmount: item.originalAmount,
+      kind: item.kind || null,
+      color: item.color || null,
+    })),
+    ingresos: periodIngresos.map((item) => ({
+      id: item.id,
+      name: item.name,
+      amount: item.amount,
+    })),
+    totals: {
+      pagos: sumAmounts(periodPagos),
+      ingresos: sumAmounts(periodIngresos),
+      deudas: sumAmounts(ledger.deudas),
+      ahorros: sumAmounts(ledger.ahorros),
+      remainder: Number((sumAmounts(periodIngresos) - sumAmounts(periodPagos)).toFixed(2)),
+    },
+  }
+  const carriedPagos = periodPagos.map((item) => ({
+    ...item,
+    id: createId(),
+    periodKey: nextKey,
+    paid: false,
+    paidAt: null,
+    appliedAmount: 0,
+    createdAt: closedAt,
+    updatedAt: closedAt,
+  }))
+  return {
+    ...ledger,
+    closedMonths: [snapshot, ...(ledger.closedMonths || [])],
+    periodKey: nextKey,
+    pagos: [...carriedPagos, ...ledger.pagos.filter((row) => !inPeriod(row, period))],
+    ingresos: ledger.ingresos.filter((row) => !inPeriod(row, period)),
+  }
+}
+
+function applySurplus(ledger, amount, ahorroId, extraName) {
+  if (ahorroId) {
+    return {
+      ...ledger,
+      ahorros: ledger.ahorros.map((item) =>
+        item.id === ahorroId
+          ? { ...item, amount: Number((item.amount + amount).toFixed(2)), updatedAt: nowIso() }
+          : item,
+      ),
+    }
+  }
+  const item = {
+    id: createId(),
+    name: extraName || 'Ahorro del mes',
+    amount,
+    goalAmount: 0,
+    monthlyTarget: 0,
+    image: '',
+    link: '',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  }
+  return { ...ledger, ahorros: [item, ...ledger.ahorros] }
+}
+
+function closeMonthGuard(ledger) {
+  const period = openPeriod(ledger)
+  if ((ledger.closedMonths || []).some((month) => month.monthKey === period)) {
+    return { ok: false, error: 'Este mes ya está cerrado.' }
+  }
+  if (!isMonthCloseWindow(period)) {
+    return { ok: false, error: 'El mes se cierra en los últimos días.' }
+  }
+  const periodPagos = ledger.pagos.filter((row) => inPeriod(row, period))
+  if (!periodPagos.length) {
+    return { ok: false, error: 'Agrega los pagos del mes antes de cerrarlo.' }
+  }
+  const pending = periodPagos.filter((row) => !isPagoPaid(row))
+  if (pending.length) {
+    return { ok: false, error: 'Aún hay pagos pendientes.' }
+  }
+  return { ok: true }
 }
 
 function localAccountByUsername(username) {
@@ -71,6 +185,7 @@ export default function FinanzasProvider({ children }) {
   const [usingApi, setUsingApi] = useState(false)
   const usingApiRef = useRef(false)
   const saveQueue = useRef(Promise.resolve())
+  const pendingCloseRef = useRef(false)
 
   const persist = useCallback((nextStore, nextSessionId = sessionId) => {
     setStore(nextStore)
@@ -89,14 +204,16 @@ export default function FinanzasProvider({ children }) {
       })
   }, [sessionId])
 
-  const account = store.accounts.find((item) => item.id === sessionId) ?? null
+  const account = useMemo(() => {
+    const raw = store.accounts.find((item) => item.id === sessionId) ?? null
+    return withHydrated(raw)
+  }, [store.accounts, sessionId])
 
   const updateLedger = useCallback(
-    (updater, historyEntry) => {
+    (updater) => {
       if (!account) return
-      const current = cloneLedger(account.data)
-      let next = updater(current)
-      if (historyEntry) next = pushHistory(next, historyEntry)
+      const current = hydrateLedger(cloneLedger(account.data))
+      const next = hydrateLedger(updater(current) || current)
       const nextStore = {
         ...store,
         accounts: store.accounts.map((item) =>
@@ -120,7 +237,7 @@ export default function FinanzasProvider({ children }) {
         try {
           const local = localAccountByUsername(name)
           const payload = await registerAccount(name, pin, local?.data)
-          persist({ accounts: [payload.account] }, payload.account.id)
+          persist({ accounts: [withHydrated(payload.account)] }, payload.account.id)
           return { ok: true }
         } catch (error) {
           return { ok: false, error: error.message }
@@ -155,10 +272,10 @@ export default function FinanzasProvider({ children }) {
           let account = payload.account
           const local = localAccountByUsername(account.username)
           if (local?.data && isLedgerEmpty(account.data) && !isLedgerEmpty(local.data)) {
-            const saved = await saveLedger(local.data)
+            const saved = await saveLedger(hydrateLedger(local.data))
             account = saved.account
           }
-          persist({ accounts: [account] }, account.id)
+          persist({ accounts: [withHydrated(account)] }, account.id)
           return { ok: true }
         } catch (error) {
           return { ok: false, error: error.message }
@@ -198,9 +315,13 @@ export default function FinanzasProvider({ children }) {
         try {
           const payload = await fetchMe()
           if (cancelled) return
-          setStore({ accounts: [payload.account] })
-          setSessionId(payload.account.id)
-          saveSessionId(payload.account.id)
+          const account = withHydrated(payload.account)
+          setStore({ accounts: [account] })
+          setSessionId(account.id)
+          saveSessionId(account.id)
+          if (!payload.account?.data?.periodKey) {
+            saveLedger(account.data).catch((error) => console.error(error))
+          }
         } catch {
           clearApiToken()
           setStore({ accounts: [] })
@@ -221,109 +342,107 @@ export default function FinanzasProvider({ children }) {
   }, [])
 
   const addCredito = useCallback(
-    ({ name, amount }) => {
-      const item = { id: createId(), name, amount, createdAt: nowIso(), updatedAt: nowIso() }
-      updateLedger(
-        (ledger) => ({ ...ledger, creditos: [item, ...ledger.creditos] }),
-        { module: 'creditos', action: 'create', label: name, detail: `Línea de crédito ${name}` },
-      )
+    ({ name, amount, kind, color }) => {
+      const item = {
+        id: createId(),
+        name,
+        amount,
+        kind: kind || 'otros',
+        color: kind === 'tarjeta' ? color || null : null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
+      updateLedger((ledger) => ({ ...ledger, creditos: [item, ...ledger.creditos] }))
     },
     [updateLedger],
   )
 
   const updateCredito = useCallback(
     (id, patch) => {
-      updateLedger(
-        (ledger) => ({
-          ...ledger,
-          creditos: ledger.creditos.map((item) =>
-            item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
-          ),
-        }),
-        { module: 'creditos', action: 'update', label: patch.name ?? id, detail: 'Crédito editado' },
-      )
+      updateLedger((ledger) => ({
+        ...ledger,
+        creditos: ledger.creditos.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                ...patch,
+                color: (patch.kind ?? item.kind) === 'tarjeta' ? patch.color ?? item.color : null,
+                updatedAt: nowIso(),
+              }
+            : item,
+        ),
+      }))
     },
     [updateLedger],
   )
 
   const removeCredito = useCallback(
     (id) => {
-      updateLedger((ledger) => {
-        const item = ledger.creditos.find((row) => row.id === id)
-        return {
-          ...ledger,
-          creditos: ledger.creditos.filter((row) => row.id !== id),
-          history: pushHistory(ledger, {
-            module: 'creditos',
-            action: 'delete',
-            label: item?.name ?? id,
-            detail: 'Crédito eliminado',
-          }).history,
-        }
-      })
+      updateLedger((ledger) => ({
+        ...ledger,
+        creditos: ledger.creditos.filter((row) => row.id !== id),
+      }))
     },
     [updateLedger],
   )
 
   const addDeuda = useCallback(
-    ({ name, amount }) => {
+    ({ name, amount, kind, color }) => {
       const item = {
         id: createId(),
         name,
         originalAmount: amount,
         amount,
+        kind: kind || 'otros',
+        color: kind === 'tarjeta' ? color || null : null,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       }
-      updateLedger(
-        (ledger) => ({ ...ledger, deudas: [item, ...ledger.deudas] }),
-        { module: 'deudas', action: 'create', label: name, detail: `Deuda registrada` },
-      )
+      updateLedger((ledger) => ({ ...ledger, deudas: [item, ...ledger.deudas] }))
     },
     [updateLedger],
   )
 
   const updateDeuda = useCallback(
     (id, patch) => {
-      updateLedger(
-        (ledger) => ({
-          ...ledger,
-          deudas: ledger.deudas.map((item) => {
-            if (item.id !== id) return item
-            const nextAmount = patch.amount ?? item.amount
-            return {
-              ...item,
-              ...patch,
-              amount: nextAmount,
-              originalAmount: Math.max(item.originalAmount, nextAmount),
-              updatedAt: nowIso(),
-            }
-          }),
+      updateLedger((ledger) => ({
+        ...ledger,
+        deudas: ledger.deudas.map((item) => {
+          if (item.id !== id) return item
+          const nextAmount = patch.amount ?? item.amount
+          return {
+            ...item,
+            ...patch,
+            amount: nextAmount,
+            originalAmount: Math.max(item.originalAmount, nextAmount),
+            color: (patch.kind ?? item.kind) === 'tarjeta' ? patch.color ?? item.color : null,
+            updatedAt: nowIso(),
+          }
         }),
-        { module: 'deudas', action: 'update', label: patch.name ?? id, detail: 'Deuda editada' },
-      )
+        pagos: ledger.pagos.map((pago) => {
+          if (pago.deudaId !== id) return pago
+          return {
+            ...pago,
+            name: patch.name ?? pago.name,
+            kind: patch.kind ?? pago.kind,
+            color: (patch.kind ?? pago.kind) === 'tarjeta' ? patch.color ?? pago.color : null,
+            updatedAt: nowIso(),
+          }
+        }),
+      }))
     },
     [updateLedger],
   )
 
   const removeDeuda = useCallback(
     (id) => {
-      updateLedger((ledger) => {
-        const item = ledger.deudas.find((row) => row.id === id)
-        return {
-          ...ledger,
-          deudas: ledger.deudas.filter((row) => row.id !== id),
-          pagos: ledger.pagos.map((pago) =>
-            pago.deudaId === id ? { ...pago, deudaId: null } : pago,
-          ),
-          history: pushHistory(ledger, {
-            module: 'deudas',
-            action: 'delete',
-            label: item?.name ?? id,
-            detail: 'Deuda eliminada',
-          }).history,
-        }
-      })
+      updateLedger((ledger) => ({
+        ...ledger,
+        deudas: ledger.deudas.filter((row) => row.id !== id),
+        pagos: ledger.pagos.map((pago) =>
+          pago.deudaId === id ? { ...pago, deudaId: null } : pago,
+        ),
+      }))
     },
     [updateLedger],
   )
@@ -346,23 +465,10 @@ export default function FinanzasProvider({ children }) {
     return { ledger: { ...ledger, deudas }, applied }
   }, [])
 
-  const maybePromptSurplus = useCallback((ledger) => {
-    const month = currentMonthKey()
-    const totalIngresos = sumAmounts(ledger.ingresos.filter((row) => inMonth(row.createdAt, month)))
-    const totalPagos = sumAmounts(
-      paidPagos(ledger.pagos.filter((row) => inMonth(row.createdAt, month))),
-    )
-    const remainder = Number((totalIngresos - totalPagos).toFixed(2))
-    if (remainder > 0 && totalIngresos > 0 && totalPagos > 0) {
-      setSurplusPrompt({ remainder, month })
-    } else {
-      setSurplusPrompt(null)
-    }
-  }, [])
-
   const addPago = useCallback(
     ({ name, amount, deudaId }) => {
       updateLedger((ledger) => {
+        const deuda = deudaId ? ledger.deudas.find((row) => row.id === deudaId) : null
         const item = {
           id: createId(),
           name,
@@ -371,18 +477,13 @@ export default function FinanzasProvider({ children }) {
           paid: false,
           paidAt: null,
           appliedAmount: 0,
+          kind: deuda?.kind || 'otros',
+          color: deuda?.kind === 'tarjeta' ? deuda.color || null : null,
+          periodKey: openPeriod(ledger),
           createdAt: nowIso(),
           updatedAt: nowIso(),
         }
-        return pushHistory(
-          { ...ledger, pagos: [item, ...ledger.pagos] },
-          {
-            module: 'pagos',
-            action: 'create',
-            label: name,
-            detail: 'Pago mensual pendiente',
-          },
-        )
+        return { ...ledger, pagos: [item, ...ledger.pagos] }
       })
     },
     [updateLedger],
@@ -424,16 +525,10 @@ export default function FinanzasProvider({ children }) {
               : row,
           ),
         }
-        maybePromptSurplus(next)
-        return pushHistory(next, {
-          module: 'pagos',
-          action: 'update',
-          label: current.name,
-          detail: paid ? 'Marcado como pagado' : 'Marcado como pendiente',
-        })
+        return next
       })
     },
-    [applyPaymentToDebt, maybePromptSurplus, updateLedger],
+    [applyPaymentToDebt, updateLedger],
   )
 
   const updatePago = useCallback(
@@ -448,6 +543,7 @@ export default function FinanzasProvider({ children }) {
         }
         const nextDeudaId = patch.deudaId === undefined ? current.deudaId : patch.deudaId
         const nextAmount = patch.amount ?? current.amount
+        const nextDeuda = nextDeudaId ? next.deudas.find((row) => row.id === nextDeudaId) : null
         let appliedAmount = 0
         if (paid) {
           const applied = applyPaymentToDebt(next, nextDeudaId, nextAmount)
@@ -463,6 +559,8 @@ export default function FinanzasProvider({ children }) {
                   ...patch,
                   amount: nextAmount,
                   deudaId: nextDeudaId || null,
+                  kind: nextDeuda?.kind || 'otros',
+                  color: nextDeuda?.kind === 'tarjeta' ? nextDeuda.color || null : null,
                   paid,
                   appliedAmount,
                   updatedAt: nowIso(),
@@ -470,7 +568,7 @@ export default function FinanzasProvider({ children }) {
               : row,
           ),
         }
-      }, { module: 'pagos', action: 'update', label: patch.name ?? id, detail: 'Pago editado' })
+      })
     },
     [applyPaymentToDebt, updateLedger],
   )
@@ -488,34 +586,28 @@ export default function FinanzasProvider({ children }) {
           ...next,
           pagos: next.pagos.filter((row) => row.id !== id),
         }
-        maybePromptSurplus(after)
-        return {
-          ...after,
-          history: pushHistory(after, {
-            module: 'pagos',
-            action: 'delete',
-            label: current.name,
-            detail: 'Pago eliminado',
-          }).history,
-        }
+        return after
       })
     },
-    [applyPaymentToDebt, maybePromptSurplus, updateLedger],
+    [applyPaymentToDebt, updateLedger],
   )
 
   const addIngreso = useCallback(
     ({ name, amount }) => {
       updateLedger((ledger) => {
-        const item = { id: createId(), name, amount, createdAt: nowIso(), updatedAt: nowIso() }
-        const next = pushHistory(
-          { ...ledger, ingresos: [item, ...ledger.ingresos] },
-          { module: 'ingresos', action: 'create', label: name, detail: 'Ingreso registrado' },
-        )
-        maybePromptSurplus(next)
+        const item = {
+          id: createId(),
+          name,
+          amount,
+          periodKey: openPeriod(ledger),
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        }
+        const next = { ...ledger, ingresos: [item, ...ledger.ingresos] }
         return next
       })
     },
-    [maybePromptSurplus, updateLedger],
+    [updateLedger],
   )
 
   const updateIngreso = useCallback(
@@ -527,34 +619,23 @@ export default function FinanzasProvider({ children }) {
             item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
           ),
         }
-        maybePromptSurplus(next)
         return next
-      }, { module: 'ingresos', action: 'update', label: patch.name ?? id, detail: 'Ingreso editado' })
+      })
     },
-    [maybePromptSurplus, updateLedger],
+    [updateLedger],
   )
 
   const removeIngreso = useCallback(
     (id) => {
       updateLedger((ledger) => {
-        const item = ledger.ingresos.find((row) => row.id === id)
         const next = {
           ...ledger,
           ingresos: ledger.ingresos.filter((row) => row.id !== id),
         }
-        maybePromptSurplus(next)
-        return {
-          ...next,
-          history: pushHistory(next, {
-            module: 'ingresos',
-            action: 'delete',
-            label: item?.name ?? id,
-            detail: 'Ingreso eliminado',
-          }).history,
-        }
+        return next
       })
     },
-    [maybePromptSurplus, updateLedger],
+    [updateLedger],
   )
 
   const addAhorro = useCallback(
@@ -570,44 +651,122 @@ export default function FinanzasProvider({ children }) {
         createdAt: nowIso(),
         updatedAt: nowIso(),
       }
-      updateLedger(
-        (ledger) => ({ ...ledger, ahorros: [item, ...ledger.ahorros] }),
-        { module: 'ahorros', action: 'create', label: name, detail: 'Meta de ahorro' },
-      )
+      updateLedger((ledger) => ({ ...ledger, ahorros: [item, ...ledger.ahorros] }))
     },
     [updateLedger],
   )
 
   const updateAhorro = useCallback(
     (id, patch) => {
-      updateLedger(
-        (ledger) => ({
-          ...ledger,
-          ahorros: ledger.ahorros.map((item) =>
-            item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
-          ),
-        }),
-        { module: 'ahorros', action: 'update', label: patch.name ?? id, detail: 'Ahorro editado' },
-      )
+      updateLedger((ledger) => ({
+        ...ledger,
+        ahorros: ledger.ahorros.map((item) =>
+          item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
+        ),
+      }))
     },
     [updateLedger],
   )
 
   const removeAhorro = useCallback(
     (id) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        ahorros: ledger.ahorros.filter((row) => row.id !== id),
+      }))
+    },
+    [updateLedger],
+  )
+
+  const addPrestamo = useCallback(
+    ({ name, amount, interest, image, dueDate, notes }) => {
+      const item = {
+        id: createId(),
+        name,
+        amount,
+        interest: interest || 0,
+        image: image || '',
+        dueDate: dueDate || '',
+        notes: notes || '',
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
+      updateLedger((ledger) => ({
+        ...ledger,
+        prestamos: [item, ...(ledger.prestamos || [])],
+      }))
+    },
+    [updateLedger],
+  )
+
+  const updatePrestamo = useCallback(
+    (id, patch) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        prestamos: (ledger.prestamos || []).map((item) =>
+          item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
+        ),
+      }))
+    },
+    [updateLedger],
+  )
+
+  const removePrestamo = useCallback(
+    (id) => {
       updateLedger((ledger) => {
-        const item = ledger.ahorros.find((row) => row.id === id)
+        const current = (ledger.prestamos || []).find((row) => row.id === id)
+        if (!current) return ledger
         return {
           ...ledger,
-          ahorros: ledger.ahorros.filter((row) => row.id !== id),
-          history: pushHistory(ledger, {
-            module: 'ahorros',
-            action: 'delete',
-            label: item?.name ?? id,
-            detail: 'Ahorro eliminado',
-          }).history,
+          prestamoDisponible: poolAfterRemovingLoan(ledger.prestamoDisponible, current),
+          prestamos: (ledger.prestamos || []).filter((row) => row.id !== id),
         }
       })
+    },
+    [updateLedger],
+  )
+
+  const collectPrestamo = useCallback(
+    (id, collector) => {
+      const name = String(collector || '').trim()
+      if (!name) return { ok: false, error: 'Escribe el nombre de quien cobró.' }
+      updateLedger((ledger) => {
+        const current = (ledger.prestamos || []).find((item) => item.id === id)
+        if (!current || current.collected) return ledger
+        const collectedAmount = loanTotal(current)
+        const interest = loanInterestAmount(current)
+        const pool = Number(ledger.prestamoDisponible) || 0
+        const poolDelta = pool > 0 ? interest : collectedAmount
+        const nextPool = Number((pool + poolDelta).toFixed(2))
+        return {
+          ...ledger,
+          prestamoDisponible: nextPool,
+          prestamos: (ledger.prestamos || []).map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  collected: true,
+                  collector: name,
+                  collectedAt: nowIso(),
+                  collectedAmount,
+                  poolDelta,
+                  updatedAt: nowIso(),
+                }
+              : item,
+          ),
+        }
+      })
+      return { ok: true }
+    },
+    [updateLedger],
+  )
+
+  const setPrestamoDisponible = useCallback(
+    (amount) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        prestamoDisponible: Number(amount) || 0,
+      }))
     },
     [updateLedger],
   )
@@ -616,36 +775,25 @@ export default function FinanzasProvider({ children }) {
     (ahorroId, extraName) => {
       if (!surplusPrompt) return
       const amount = surplusPrompt.remainder
+      const shouldClose = pendingCloseRef.current
+      pendingCloseRef.current = false
       updateLedger((ledger) => {
-        if (ahorroId) {
-          return {
-            ...ledger,
-            ahorros: ledger.ahorros.map((item) =>
-              item.id === ahorroId
-                ? { ...item, amount: Number((item.amount + amount).toFixed(2)), updatedAt: nowIso() }
-                : item,
-            ),
-          }
-        }
-        const item = {
-          id: createId(),
-          name: extraName || 'Ahorro del mes',
-          amount,
-          goalAmount: 0,
-          monthlyTarget: 0,
-          image: '',
-          link: '',
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        }
-        return { ...ledger, ahorros: [item, ...ledger.ahorros] }
-      }, { module: 'ahorros', action: 'create', label: extraName || 'Remanente', detail: 'Remanente ahorrado' })
+        const withSurplus = applySurplus(ledger, amount, ahorroId, extraName)
+        return shouldClose ? applyMonthClose(withSurplus) : withSurplus
+      })
       setSurplusPrompt(null)
     },
     [surplusPrompt, updateLedger],
   )
 
-  const dismissSurplus = useCallback(() => setSurplusPrompt(null), [])
+  const dismissSurplus = useCallback(() => {
+    const shouldClose = pendingCloseRef.current
+    pendingCloseRef.current = false
+    setSurplusPrompt(null)
+    if (shouldClose) {
+      updateLedger((ledger) => applyMonthClose(ledger))
+    }
+  }, [updateLedger])
 
   const isAdmin = isAdminUsername(account?.username)
 
@@ -683,16 +831,32 @@ export default function FinanzasProvider({ children }) {
     [persist, sessionId, store.accounts],
   )
 
+  const closeMonth = useCallback(() => {
+    if (!account) return { ok: false, error: 'No hay una cuenta activa.' }
+    const ledger = hydrateLedger(account.data)
+    const guard = closeMonthGuard(ledger)
+    if (!guard.ok) return guard
+    const remainder = periodRemainder(ledger)
+    if (remainder > 0) {
+      pendingCloseRef.current = true
+      setSurplusPrompt({ remainder, month: openPeriod(ledger), fromClose: true })
+      return { ok: true, waitingSurplus: true }
+    }
+    updateLedger((current) => applyMonthClose(current))
+    return { ok: true }
+  }, [account, updateLedger])
+
   const totals = useMemo(() => {
     const data = account?.data ?? emptyLedger()
-    const month = currentMonthKey()
-    const ingresosMes = data.ingresos.filter((row) => inMonth(row.createdAt, month))
-    const pagosMes = data.pagos.filter((row) => inMonth(row.createdAt, month))
+    const month = openPeriod(data)
+    const ingresosMes = data.ingresos.filter((row) => inPeriod(row, month))
+    const pagosMes = data.pagos.filter((row) => inPeriod(row, month))
     const pagosPagadosMes = paidPagos(pagosMes)
     const totalIngresos = sumAmounts(ingresosMes)
     const totalPagos = sumAmounts(pagosPagadosMes)
     const totalPendientes = sumAmounts(pagosMes.filter((row) => !isPagoPaid(row)))
     return {
+      periodKey: month,
       creditos: sumAmounts(data.creditos),
       deudas: sumAmounts(data.deudas),
       pagos: sumAmounts(paidPagos(data.pagos)),
@@ -701,6 +865,8 @@ export default function FinanzasProvider({ children }) {
       ingresos: sumAmounts(data.ingresos),
       ingresosMes: totalIngresos,
       ahorros: sumAmounts(data.ahorros),
+      prestamos: sumAmounts(openLoans(data.prestamos || [])),
+      prestamoDisponible: Number(data.prestamoDisponible) || 0,
       remainder: totalIngresos - totalPagos,
     }
   }, [account])
@@ -739,8 +905,14 @@ export default function FinanzasProvider({ children }) {
     addAhorro,
     updateAhorro,
     removeAhorro,
+    addPrestamo,
+    updatePrestamo,
+    removePrestamo,
+    collectPrestamo,
+    setPrestamoDisponible,
     allocateSurplus,
     dismissSurplus,
+    closeMonth,
     listUsers,
     deleteUser,
   }

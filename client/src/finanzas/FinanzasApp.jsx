@@ -5,6 +5,7 @@ import ThemeTransition from './components/ThemeTransition'
 import FinanzasLayout from './FinanzasLayout'
 import AhorrosPage from './pages/AhorrosPage'
 import AjustesPage from './pages/AjustesPage'
+import PrestamosPage from './pages/PrestamosPage'
 import CreditosPage from './pages/CreditosPage'
 import DeudasPage from './pages/DeudasPage'
 import IngresosPage from './pages/IngresosPage'
@@ -24,6 +25,7 @@ export default function FinanzasApp() {
             <Route path="pagos" element={<PagosPage />} />
             <Route path="ingresos" element={<IngresosPage />} />
             <Route path="ahorros" element={<AhorrosPage />} />
+            <Route path="prestamos" element={<PrestamosPage />} />
             <Route path="ajustes" element={<AjustesPage />} />
           </Route>
         </Routes>

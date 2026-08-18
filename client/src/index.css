@@ -176,3 +176,21 @@ body {
 .fnz-scroll-x::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes fnz-due-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 10px 30px rgba(15, 23, 42, 0.05);
+  }
+  50% {
+    box-shadow:
+      0 1px 2px rgba(255, 149, 0, 0.12),
+      0 12px 28px rgba(255, 149, 0, 0.18);
+  }
+}
+
+.fnz-due-pulse {
+  animation: fnz-due-pulse 2.4s ease-in-out infinite;
+}

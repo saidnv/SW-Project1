@@ -1,6 +1,7 @@
-import { currentMonthKey, inMonth } from './dates'
 import { formatSoles, sumAmounts } from './money'
 import { paidPagos } from './pagos'
+import { inPeriod, openPeriod } from './period'
+import { dueAlertLoans, dueHeadline, remainingToLend } from './prestamos'
 
 export function getKabinGuide(section) {
   const guides = {
@@ -10,27 +11,33 @@ export function getKabinGuide(section) {
       'Si sobra dinero, te preguntaré si quieres enviarlo a un ahorro.',
     ],
     creditos: [
-      'Registra cada línea o crédito con su nombre y monto disponible.',
-      'El total se calcula solo. Úsalo como respaldo si un mes no alcanza.',
+      'Elige el tipo: tarjeta, Yape crédito u otros. Luego pon el nombre y el monto.',
+      'Si es tarjeta, se muestra como una card y puedes elegir su color.',
     ],
     deudas: [
-      'Anota el tipo o nombre de cada deuda y su monto.',
-      'La barra de progreso sube cuando registras pagos mensuales ligados a esa deuda.',
-      'Los colores marcan deudas altas (rojo) y bajas (verde).',
+      'Separa tipo y nombre. Una deuda de tarjeta también se ve como card.',
+      'La barra de progreso sube cuando marcas pagos ligados a esa deuda.',
     ],
     pagos: [
       'Crea el pago mensual como pendiente: aún no se descuenta de la deuda.',
       'Cuando lo pagues de verdad, usa el interruptor Pagado / Pendiente.',
       'Solo los pagos marcados como pagados bajan la deuda y se restan de los ingresos.',
+      'En los últimos días del mes, si todo está pagado, aparece Cerrar mes.',
     ],
     ingresos: [
       'Registra sueldos u otros ingresos en soles.',
       'Del total de ingresos se restan los pagos del mes.',
-      'Si hay remanente, podrás ahorrarlo o dejarlo sin asignar.',
+      'Si hay remanente, al cerrar el mes podrás pasarlo a una meta.',
     ],
     ahorros: [
       'Crea metas (viaje, casa, auto, PC) con un monto actual y una meta total.',
       'Puedes fijar un ahorro mensual y agregar una imagen o un enlace.',
+    ],
+    prestamos: [
+      'Define primero cuánto dinero tienes apartado para prestar. Ese fondo no se mezcla con el ahorro.',
+      'Al crear un préstamo anota a quién, el monto, el interés, la fecha y una foto o constancia.',
+      'Si falta un día para vencer, Kabin lo muestra en el resumen.',
+      'Cuando te paguen, usa Cobrado y anota quién cobró. El monto vuelve al fondo.',
     ],
     ajustes: [
       'Elige el tema visual. Se guarda en este navegador.',
@@ -48,6 +55,7 @@ const SECTION_TITLES = {
   pagos: 'Pagos mensuales',
   ingresos: 'Ingresos',
   ahorros: 'Ahorros',
+  prestamos: "Préstamos Bésame m'de",
   ajustes: 'Ajustes',
 }
 
@@ -60,9 +68,10 @@ export function getKabinTip(section) {
     resumen: 'Completa deudas, ingresos y pagos para ver tu remanente.',
     creditos: 'Registra cada línea con nombre y monto disponible.',
     deudas: 'Los pagos marcados como pagados bajan la deuda.',
-    pagos: 'Marca Pagado solo cuando salga el dinero.',
+    pagos: 'Cierra el mes solo cuando todos los pagos estén pagados.',
     ingresos: 'Registra sueldos e ingresos del mes en soles.',
     ahorros: 'Define meta total y monto actual de cada ahorro.',
+    prestamos: 'El fondo para prestar es independiente del ahorro.',
     ajustes: 'El tema se guarda en este navegador.',
   }
 
@@ -75,21 +84,23 @@ export function getPrimaryKabinMessage(messages) {
 }
 
 export function getKabinAdvice(data, persona = 'Kabin') {
-  const { creditos, deudas, pagos, ingresos, ahorros } = data
+  const { creditos, deudas, pagos, ingresos, ahorros, prestamos = [] } = data
   const melody = persona === 'My Melody'
-  const month = currentMonthKey()
-  const ingresosMes = ingresos.filter((item) => inMonth(item.createdAt, month))
-  const pagosMes = paidPagos(pagos.filter((item) => inMonth(item.createdAt, month)))
+  const month = openPeriod(data)
+  const ingresosMes = ingresos.filter((item) => inPeriod(item, month))
+  const pagosMes = paidPagos(pagos.filter((item) => inPeriod(item, month)))
   const totalIngresos = sumAmounts(ingresosMes)
   const totalPagos = sumAmounts(pagosMes)
   const remainder = totalIngresos - totalPagos
   const totalAhorros = sumAmounts(ahorros)
   const totalCreditos = sumAmounts(creditos)
   const totalDeudas = sumAmounts(deudas)
+  const dueLoans = dueAlertLoans(prestamos)
+  const leftoverLend = remainingToLend(data.prestamoDisponible, prestamos)
 
   const messages = []
 
-  if (!ingresosMes.length && !pagos.length && !deudas.length) {
+  if (!ingresosMes.length && !pagos.length && !deudas.length && !prestamos.length) {
     messages.push({
       id: 'welcome',
       tone: 'info',
@@ -100,6 +111,31 @@ export function getKabinAdvice(data, persona = 'Kabin') {
         : 'Completa deudas, pagos e ingresos para empezar.',
     })
     return { remainder, totalIngresos, totalPagos, messages }
+  }
+
+  if (dueLoans.length) {
+    const first = dueLoans[0]
+    messages.push({
+      id: `loan-due-${first.id}-${first.dueDate}`,
+      tone: 'alert',
+      important: true,
+      title: melody ? 'Hay un préstamo por cobrar' : 'Préstamo por vencer',
+      body: melody
+        ? `Mira el resumen: ${dueHeadline(first)}. Con cariño, cobra a tiempo y guarda la constancia.`
+        : `${dueHeadline(first)}. Revisa la constancia en Préstamos.`,
+    })
+  }
+
+  if (leftoverLend < 0) {
+    messages.push({
+      id: 'lend-over',
+      tone: 'warn',
+      important: false,
+      title: melody ? 'Prestaste más del fondo' : 'Fondo de préstamos excedido',
+      body: melody
+        ? `El dinero apartado para prestar no alcanza. Te pasaste por ${formatSoles(Math.abs(leftoverLend))}. Eso sigue aparte de tus ahorros.`
+        : `Te pasaste ${formatSoles(Math.abs(leftoverLend))} del fondo para prestar.`,
+    })
   }
 
   if (remainder < 0) {
@@ -146,8 +182,8 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       important: false,
       title: melody ? '¡Te quedó un ahorro posible!' : 'Hay remanente',
       body: melody
-        ? `Después de pagar, te quedan ${formatSoles(remainder)}. Si quieres, lo mandamos a una meta de ahorro. Tú decides.`
-        : `Te quedan ${formatSoles(remainder)} después de pagar.`,
+        ? `Después de pagar, te quedan ${formatSoles(remainder)}. Al cerrar el mes podrás pasarlo a una meta.`
+        : `Te quedan ${formatSoles(remainder)}. Al cerrar el mes podrás ahorrarlo.`,
     })
   }
 

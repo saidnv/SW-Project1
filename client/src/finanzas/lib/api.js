@@ -80,7 +80,9 @@ export function saveLedger(data) {
 
 export function isLedgerEmpty(data) {
   if (!data) return true
-  return ['creditos', 'deudas', 'pagos', 'ingresos', 'ahorros'].every(
+  if (Array.isArray(data.closedMonths) && data.closedMonths.length) return false
+  if (Number(data.prestamoDisponible) > 0) return false
+  return ['creditos', 'deudas', 'pagos', 'ingresos', 'ahorros', 'prestamos'].every(
     (key) => !Array.isArray(data[key]) || data[key].length === 0,
   )
 }

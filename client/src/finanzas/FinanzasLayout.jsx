@@ -14,6 +14,7 @@ const NAV = [
   { to: '/finanzas/pagos', label: 'Pagos mensuales', shortLabel: 'Pagos', section: 'pagos' },
   { to: '/finanzas/ingresos', label: 'Sueldo e ingresos', shortLabel: 'Ingresos', section: 'ingresos' },
   { to: '/finanzas/ahorros', label: 'Ahorros', shortLabel: 'Ahorros', section: 'ahorros' },
+  { to: '/finanzas/prestamos', label: "Préstamos Bésame m'de", shortLabel: 'Préstamos', section: 'prestamos' },
 ]
 
 function sectionFromPath(pathname) {
