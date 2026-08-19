@@ -5,6 +5,7 @@ import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, btnText, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
+import { formatDate } from '../lib/dates'
 import { formatSoles, parseAmount } from '../lib/money'
 
 const emptyForm = {
@@ -14,6 +15,11 @@ const emptyForm = {
   monthlyTarget: '',
   link: '',
   image: '',
+}
+
+const emptyDepositForm = {
+  amount: '',
+  source: '',
 }
 
 function readImage(file) {
@@ -34,12 +40,18 @@ function readImage(file) {
 }
 
 export default function AhorrosPage() {
-  const { account, addAhorro, updateAhorro, removeAhorro } = useFinanzas()
+  const { account, addAhorro, updateAhorro, addAhorroDeposit, removeAhorro } = useFinanzas()
   const items = account.data.ahorros
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [error, setError] = useState('')
+
+  const [depositAhorroId, setDepositAhorroId] = useState(null)
+  const [depositForm, setDepositForm] = useState(emptyDepositForm)
+  const [depositOpen, setDepositOpen] = useState(false)
+
+  const [historyAhorroId, setHistoryAhorroId] = useState(null)
 
   function closeForm() {
     setFormOpen(false)
@@ -82,6 +94,37 @@ export default function AhorrosPage() {
     })
     setFormOpen(true)
   }
+
+  function openDeposit(item) {
+    setDepositAhorroId(item.id)
+    setDepositForm(emptyDepositForm)
+    setDepositOpen(true)
+  }
+
+  function closeDeposit() {
+    setDepositOpen(false)
+    setDepositAhorroId(null)
+    setDepositForm(emptyDepositForm)
+  }
+
+  function submitDeposit(event) {
+    event.preventDefault()
+    const amount = parseAmount(depositForm.amount)
+    const source = depositForm.source.trim()
+    if (!depositAhorroId || amount <= 0) return
+    addAhorroDeposit(depositAhorroId, { amount, source })
+    closeDeposit()
+  }
+
+  function openHistory(item) {
+    setHistoryAhorroId(item.id)
+  }
+
+  function closeHistory() {
+    setHistoryAhorroId(null)
+  }
+
+  const historyItem = historyAhorroId ? items.find((item) => item.id === historyAhorroId) : null
 
   async function onImage(event) {
     try {
@@ -154,7 +197,9 @@ export default function AhorrosPage() {
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-[17px] font-semibold text-[var(--fnz-text)]">{item.name}</p>
+                    <button type="button" onClick={() => openHistory(item)} className="text-left">
+                      <p className="text-[17px] font-semibold text-[var(--fnz-text)]">{item.name}</p>
+                    </button>
                     <RowMenu onEdit={() => startEdit(item)} onDelete={() => removeAhorro(item.id)} />
                   </div>
                   <p className="mt-1 text-[22px] font-bold tabular-nums text-[var(--fnz-accent)]">
@@ -176,6 +221,11 @@ export default function AhorrosPage() {
                       <ProgressBar value={pct} label="Avance de la meta" />
                     </div>
                   )}
+                  <div className="mt-3">
+                    <button type="button" onClick={() => openDeposit(item)} className={btnText}>
+                      + Agregar dinero
+                    </button>
+                  </div>
                 </div>
               </div>
             </li>
@@ -183,6 +233,76 @@ export default function AhorrosPage() {
         })}
         {!items.length && <p className={empty}>No hay metas de ahorro todavía.</p>}
       </ul>
+
+      {depositOpen && depositAhorroId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[28px] bg-[var(--fnz-card)] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+            <h2 className="text-center text-[22px] font-semibold text-[var(--fnz-text)]">Agregar dinero</h2>
+            <p className="mt-2 text-center text-[15px] text-[var(--fnz-muted)]">
+              Sumar monto a la meta de ahorro.
+            </p>
+            <form onSubmit={submitDeposit} className="mt-5 space-y-3">
+              <Field label="Monto (S/)">
+                <input
+                  className={inputClass}
+                  inputMode="decimal"
+                  value={depositForm.amount}
+                  onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })}
+                  placeholder="0.00"
+                />
+              </Field>
+              <Field label="De donde es el dinero">
+                <input
+                  className={inputClass}
+                  value={depositForm.source}
+                  onChange={(e) => setDepositForm({ ...depositForm, source: e.target.value })}
+                  placeholder="Ej: sueldo, venta, regalo..."
+                />
+              </Field>
+              <div className="flex flex-col gap-2 pt-2">
+                <button type="submit" className={`${btnPrimary} w-full`}>
+                  Guardar
+                </button>
+                <button type="button" onClick={closeDeposit} className={`${btnText} w-full`}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {historyAhorroId && historyItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[28px] bg-[var(--fnz-card)] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[22px] font-semibold text-[var(--fnz-text)]">Historial</h2>
+                <p className="text-[15px] text-[var(--fnz-muted)]">{historyItem.name}</p>
+              </div>
+              <button type="button" onClick={closeHistory} className={btnText}>
+                Cerrar
+              </button>
+            </div>
+            <div className="mt-4 max-h-[50vh] overflow-y-auto space-y-2">
+              {(historyItem.history || []).length === 0 && (
+                <p className="text-[15px] text-[var(--fnz-muted)]">Sin movimientos registrados.</p>
+              )}
+              {(historyItem.history || []).map((entry) => (
+                <div key={entry.id} className="rounded-2xl bg-[var(--fnz-input)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[15px] font-semibold text-[var(--fnz-text)]">+{formatSoles(entry.amount)}</p>
+                    <p className="text-[13px] text-[var(--fnz-muted)]">{formatDate(entry.date)}</p>
+                  </div>
+                  {entry.source && (
+                    <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{entry.source}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

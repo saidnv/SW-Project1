@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import AmountBadge from '../components/AmountBadge'
+import Field, { inputClass } from '../components/Field'
 import KindFields, { emptyKindForm } from '../components/KindFields'
 import MonthHistory from '../components/MonthHistory'
 import PlasticCard from '../components/PlasticCard'
@@ -19,7 +20,9 @@ function paidPct(item) {
 export default function DeudasPage() {
   const { account, addDeuda, updateDeuda, removeDeuda } = useFinanzas()
   const items = account.data.deudas
-  const [form, setForm] = useState(emptyKindForm)
+  const creditos = account.data.creditos
+  const tarjetaCreditos = creditos.filter((item) => isTarjeta(item))
+  const [form, setForm] = useState({ ...emptyKindForm, creditoId: '' })
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const amounts = items.map((item) => item.amount)
@@ -27,7 +30,7 @@ export default function DeudasPage() {
   function closeForm() {
     setFormOpen(false)
     setEditingId(null)
-    setForm(emptyKindForm)
+    setForm({ ...emptyKindForm, creditoId: '' })
   }
 
   function payload() {
@@ -39,6 +42,7 @@ export default function DeudasPage() {
       amount,
       kind,
       color: kind === 'tarjeta' ? form.color || DEFAULT_CARD_COLOR : null,
+      creditoId: form.creditoId || null,
     }
   }
 
@@ -58,8 +62,22 @@ export default function DeudasPage() {
       name: item.name,
       amount: String(item.amount),
       color: item.color || DEFAULT_CARD_COLOR,
+      creditoId: item.creditoId || '',
     })
     setFormOpen(true)
+  }
+
+  function handleCreditoChange(creditoId) {
+    setForm((prev) => {
+      const credito = tarjetaCreditos.find((row) => row.id === creditoId)
+      return {
+        ...prev,
+        creditoId: creditoId || '',
+        ...(credito
+          ? { name: credito.name, kind: 'tarjeta', color: credito.color || DEFAULT_CARD_COLOR }
+          : {}),
+      }
+    })
   }
 
   return (
@@ -83,6 +101,22 @@ export default function DeudasPage() {
       >
         <form onSubmit={submit} className="space-y-3">
           <KindFields form={form} setForm={setForm} />
+          {form.kind === 'tarjeta' && (
+            <Field label="Línea de crédito (opcional)">
+              <select
+                className={inputClass}
+                value={form.creditoId}
+                onChange={(e) => handleCreditoChange(e.target.value)}
+              >
+                <option value="">Sin vincular / Otra</option>
+                {tarjetaCreditos.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · disponible {formatSoles(item.amount)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <div className="flex items-end gap-2">
             <button type="submit" className={`${btnPrimary} w-full`}>
               {editingId ? 'Guardar' : 'Agregar'}

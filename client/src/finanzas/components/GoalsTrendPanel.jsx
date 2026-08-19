@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { formatSoles } from '../lib/money'
-import { buildGoalTrend } from '../lib/trend'
+import { buildGoalDailyTrend, buildGoalTrend } from '../lib/trend'
 import DualLineChart from './DualLineChart'
 import { card } from './ui'
 
@@ -11,8 +11,12 @@ const SERIES = [
 
 export default function GoalsTrendPanel({ goals }) {
   const [selectedId, setSelectedId] = useState(null)
+  const [daily, setDaily] = useState(false)
   const selected = goals.find((item) => item.id === selectedId) ?? null
-  const trend = useMemo(() => (selected ? buildGoalTrend(selected) : { points: [], hasData: false }), [selected])
+  const trend = useMemo(() => {
+    if (!selected) return { points: [], hasData: false }
+    return daily ? buildGoalDailyTrend(selected) : buildGoalTrend(selected)
+  }, [selected, daily])
 
   if (!goals.length) {
     return (
@@ -31,13 +35,22 @@ export default function GoalsTrendPanel({ goals }) {
     return (
       <DualLineChart
         extra={
-          <button
-            type="button"
-            onClick={() => setSelectedId(null)}
-            className="mb-2 text-[14px] font-medium text-[var(--fnz-accent)]"
-          >
-            ← Ver metas
-          </button>
+          <div className="mb-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              className="text-[14px] font-medium text-[var(--fnz-accent)]"
+            >
+              ← Ver metas
+            </button>
+            <button
+              type="button"
+              onClick={() => setDaily((current) => !current)}
+              className="text-[14px] font-medium text-[var(--fnz-muted)]"
+            >
+              {daily ? 'Ver mensual' : 'Ver por día'}
+            </button>
+          </div>
         }
         eyebrow="Meta seleccionada"
         title={selected.name}
@@ -45,6 +58,7 @@ export default function GoalsTrendPanel({ goals }) {
         hasData={trend.hasData}
         series={SERIES}
         empty="Esta meta aún no tiene montos para graficar."
+        formatKey={daily ? formatDayShort : undefined}
         footer={
           pct != null
             ? `Llevas ${formatSoles(selected.amount)} de ${formatSoles(selected.goalAmount)} (${pct}%). La línea punteada es la meta.`
@@ -67,7 +81,7 @@ export default function GoalsTrendPanel({ goals }) {
             <button
               key={goal.id}
               type="button"
-              onClick={() => setSelectedId(goal.id)}
+              onClick={() => { setSelectedId(goal.id); setDaily(false) }}
               className="rounded-2xl bg-[var(--fnz-input)] p-3 text-left transition hover:-translate-y-0.5"
             >
               {goal.image ? (

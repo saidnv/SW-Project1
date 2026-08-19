@@ -123,6 +123,39 @@ export function buildGoalTrend(goal, monthsCount = 6) {
   return { points, hasData }
 }
 
+export function buildGoalDailyTrend(goal, maxDays = 60) {
+  const history = goal.history || []
+  const created = new Date(goal.createdAt)
+  created.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const keys = []
+  const current = new Date(created)
+  while (current <= today && keys.length < maxDays) {
+    const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
+    keys.push(key)
+    current.setDate(current.getDate() + 1)
+  }
+
+  const goalAmount = Number(goal.goalAmount) || 0
+
+  const points = keys.map((key) => {
+    const dayEnd = new Date(key + 'T23:59:59.999Z')
+    const actual = history
+      .filter((entry) => new Date(entry.date).getTime() <= dayEnd.getTime())
+      .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+    return {
+      key,
+      actual: Number(actual.toFixed(2)),
+      goal: goalAmount > 0 ? goalAmount : 0,
+    }
+  })
+
+  const hasData = points.some((point) => point.actual > 0 || point.goal > 0)
+  return { points, hasData }
+}
+
 export function buildPrestamosTrend(data, monthsCount = 6) {
   const prestamos = data?.prestamos ?? []
   const fondo = Number(data?.prestamoDisponible) || 0

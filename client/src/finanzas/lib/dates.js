@@ -97,6 +97,15 @@ export function formatMonthShort(key) {
   return new Date(year, month - 1, 1).toLocaleDateString('es-PE', { month: 'short' }).replace('.', '')
 }
 
+export function formatDayShort(value) {
+  const date = parseLocalDate(value)
+  if (!date) return '—'
+  return date.toLocaleDateString('es-PE', {
+    day: 'numeric',
+    month: 'short',
+  }).replace('.', '')
+}
+
 export function monthRange(fromKey, toKey) {
   const keys = []
   let current = fromKey

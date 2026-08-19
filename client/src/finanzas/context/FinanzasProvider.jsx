@@ -6,6 +6,7 @@ import { getKabinAdvice } from '../lib/kabin'
 import { sumAmounts } from '../lib/money'
 import { isPagoPaid, paidPagos } from '../lib/pagos'
 import { hydrateLedger, inPeriod, openPeriod } from '../lib/period'
+import { isTarjeta, kindOf } from '../lib/kinds'
 import { loanInterestAmount, loanTotal, openLoans, poolAfterRemovingLoan } from '../lib/prestamos'
 import {
   clearApiToken,
@@ -73,6 +74,7 @@ function applyMonthClose(ledger) {
       originalAmount: item.originalAmount,
       kind: item.kind || null,
       color: item.color || null,
+      creditoId: item.creditoId || null,
     })),
     ingresos: periodIngresos.map((item) => ({
       id: item.id,
@@ -108,11 +110,22 @@ function applyMonthClose(ledger) {
 
 function applySurplus(ledger, amount, ahorroId, extraName) {
   if (ahorroId) {
+    const deposit = {
+      id: createId(),
+      amount: Number(amount) || 0,
+      source: 'Sobrante del mes',
+      date: nowIso(),
+    }
     return {
       ...ledger,
       ahorros: ledger.ahorros.map((item) =>
         item.id === ahorroId
-          ? { ...item, amount: Number((item.amount + amount).toFixed(2)), updatedAt: nowIso() }
+          ? {
+              ...item,
+              amount: Number((item.amount + amount).toFixed(2)),
+              history: [...(item.history || []), deposit],
+              updatedAt: nowIso(),
+            }
           : item,
       ),
     }
@@ -125,6 +138,7 @@ function applySurplus(ledger, amount, ahorroId, extraName) {
     monthlyTarget: 0,
     image: '',
     link: '',
+    history: [],
     createdAt: nowIso(),
     updatedAt: nowIso(),
   }
@@ -387,18 +401,34 @@ export default function FinanzasProvider({ children }) {
   )
 
   const addDeuda = useCallback(
-    ({ name, amount, kind, color }) => {
-      const item = {
-        id: createId(),
-        name,
-        originalAmount: amount,
-        amount,
-        kind: kind || 'otros',
-        color: kind === 'tarjeta' ? color || null : null,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-      }
-      updateLedger((ledger) => ({ ...ledger, deudas: [item, ...ledger.deudas] }))
+    ({ name, amount, kind, color, creditoId }) => {
+      updateLedger((ledger) => {
+        let resolvedName = name
+        let resolvedKind = kind || 'otros'
+        let resolvedColor = kind === 'tarjeta' ? color || null : null
+
+        if (creditoId && !resolvedName) {
+          const credito = ledger.creditos.find((row) => row.id === creditoId)
+          if (credito) {
+            resolvedName = credito.name
+            resolvedKind = kindOf(credito)
+            resolvedColor = isTarjeta(credito) ? credito.color || null : null
+          }
+        }
+
+        const item = {
+          id: createId(),
+          name: resolvedName,
+          originalAmount: amount,
+          amount,
+          kind: resolvedKind,
+          color: resolvedColor,
+          creditoId: creditoId || null,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        }
+        return { ...ledger, deudas: [item, ...ledger.deudas] }
+      })
     },
     [updateLedger],
   )
@@ -409,13 +439,30 @@ export default function FinanzasProvider({ children }) {
         ...ledger,
         deudas: ledger.deudas.map((item) => {
           if (item.id !== id) return item
+          const nextCreditoId = patch.creditoId ?? item.creditoId
+          let nextName = patch.name ?? item.name
+          let nextKind = patch.kind ?? item.kind
+          let nextColor = (nextKind) === 'tarjeta' ? (patch.color ?? item.color) : null
+
+          if (nextCreditoId && !nextName) {
+            const credito = ledger.creditos.find((row) => row.id === nextCreditoId)
+            if (credito) {
+              nextName = credito.name
+              nextKind = kindOf(credito)
+              nextColor = isTarjeta(credito) ? credito.color || null : null
+            }
+          }
+
           const nextAmount = patch.amount ?? item.amount
           return {
             ...item,
             ...patch,
+            name: nextName,
+            kind: nextKind,
+            color: nextColor,
             amount: nextAmount,
             originalAmount: Math.max(item.originalAmount, nextAmount),
-            color: (patch.kind ?? item.kind) === 'tarjeta' ? patch.color ?? item.color : null,
+            creditoId: nextCreditoId,
             updatedAt: nowIso(),
           }
         }),
@@ -648,6 +695,7 @@ export default function FinanzasProvider({ children }) {
         monthlyTarget: monthlyTarget || 0,
         image: image || '',
         link: link || '',
+        history: [],
         createdAt: nowIso(),
         updatedAt: nowIso(),
       }
@@ -664,6 +712,33 @@ export default function FinanzasProvider({ children }) {
           item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
         ),
       }))
+    },
+    [updateLedger],
+  )
+
+  const addAhorroDeposit = useCallback(
+    (ahorroId, { amount, source }) => {
+      updateLedger((ledger) => {
+        const deposit = {
+          id: createId(),
+          amount: Number(amount) || 0,
+          source: String(source || '').trim(),
+          date: nowIso(),
+        }
+        return {
+          ...ledger,
+          ahorros: ledger.ahorros.map((item) =>
+            item.id === ahorroId
+              ? {
+                  ...item,
+                  amount: Number((item.amount + deposit.amount).toFixed(2)),
+                  history: [...(item.history || []), deposit],
+                  updatedAt: nowIso(),
+                }
+              : item,
+          ),
+        }
+      })
     },
     [updateLedger],
   )
@@ -904,6 +979,7 @@ export default function FinanzasProvider({ children }) {
     removeIngreso,
     addAhorro,
     updateAhorro,
+    addAhorroDeposit,
     removeAhorro,
     addPrestamo,
     updatePrestamo,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatMonthKey, formatMonthShort } from '../lib/dates'
+import { formatMonthShort } from '../lib/dates'
 import { formatSoles } from '../lib/money'
 import { card } from './ui'
 
@@ -43,6 +43,7 @@ export default function DualLineChart({
   hasData,
   series,
   extra,
+  formatKey,
 }) {
   const [active, setActive] = useState(Math.max(points.length - 1, 0))
 
@@ -51,6 +52,8 @@ export default function DualLineChart({
   }, [points, title])
 
   const selected = points[active] ?? points.at(-1)
+
+  const labelFormatter = formatKey || formatMonthShort
 
   const { width, height, padL, padR, padT, padB, maxY, ticks } = useMemo(() => {
     const width = 640
@@ -106,7 +109,9 @@ export default function DualLineChart({
 
       {selected && (
         <div className="mt-3 rounded-2xl bg-[var(--fnz-input)] px-3 py-3">
-          <p className="text-[12px] text-[var(--fnz-muted)]">{formatMonthKey(selected.key)}</p>
+          <p className="text-[12px] text-[var(--fnz-muted)]">
+            {labelFormatter(selected.key)}
+          </p>
           <div className={`mt-2 grid gap-2 ${series.length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {series.map((item) => (
               <div key={item.key}>
@@ -179,7 +184,7 @@ export default function DualLineChart({
                 fontSize="11"
                 fontWeight={active === index ? 600 : 400}
               >
-                {formatMonthShort(point.key)}
+                {labelFormatter(point.key)}
               </text>
               <rect
                 x={xFor(index) - innerW / points.length / 2}

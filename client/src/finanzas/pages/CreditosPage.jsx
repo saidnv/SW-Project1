@@ -12,6 +12,7 @@ import { formatSoles, parseAmount, sumAmounts } from '../lib/money'
 export default function CreditosPage() {
   const { account, addCredito, updateCredito, removeCredito } = useFinanzas()
   const items = account.data.creditos
+  const deudas = account.data.deudas
   const [form, setForm] = useState(emptyKindForm)
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
@@ -55,6 +56,12 @@ export default function CreditosPage() {
     setFormOpen(true)
   }
 
+  function usedAmountFor(creditoId) {
+    return deudas
+      .filter((d) => d.creditoId === creditoId)
+      .reduce((sum, d) => sum + (Number(d.amount) || 0), 0)
+  }
+
   return (
     <section className="space-y-5">
       <PageHeader
@@ -90,15 +97,22 @@ export default function CreditosPage() {
       </AddFormPanel>
 
       <ul className="space-y-3">
-        {items.map((item) =>
-          isTarjeta(item) ? (
+        {items.map((item) => {
+          const used = usedAmountFor(item.id)
+          const available = Math.max(0, item.amount - used)
+          const availableLabel = available > 0 || used > 0 ? `Queda disponible ${formatSoles(available)}` : null
+          return isTarjeta(item) ? (
             <li key={item.id}>
               <PlasticCard
                 name={item.name}
                 amount={item.amount}
                 color={item.color}
                 actions={<RowMenu tone="light" onEdit={() => startEdit(item)} onDelete={() => removeCredito(item.id)} />}
-              />
+              >
+                {availableLabel ? (
+                  <p className="text-[13px] text-white/75">Disponible {formatSoles(available)}</p>
+                ) : null}
+              </PlasticCard>
             </li>
           ) : (
             <li key={item.id} className={card}>
@@ -106,6 +120,9 @@ export default function CreditosPage() {
                 <div>
                   <p className="pt-1 text-[17px] font-semibold text-[var(--fnz-text)]">{item.name}</p>
                   <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{kindLabel(kindOf(item))}</p>
+                  {availableLabel ? (
+                    <p className="mt-1 text-[13px] text-[var(--fnz-accent)]">{availableLabel}</p>
+                  ) : null}
                 </div>
                 <div className="flex items-start gap-1">
                   <AmountBadge amount={item.amount} amounts={amounts} />
@@ -113,8 +130,8 @@ export default function CreditosPage() {
                 </div>
               </div>
             </li>
-          ),
-        )}
+          )
+        })}
         {!items.length && <p className={empty}>No hay líneas de crédito todavía.</p>}
       </ul>
     </section>
