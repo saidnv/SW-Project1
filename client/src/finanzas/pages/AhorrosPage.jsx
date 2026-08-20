@@ -3,7 +3,7 @@ import AddFormPanel from '../components/AddFormPanel'
 import Field, { inputClass } from '../components/Field'
 import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
-import { btnPrimary, btnText, card, empty, PageHeader } from '../components/ui'
+import { btnDanger, btnPrimary, btnText, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
 import { formatDate } from '../lib/dates'
 import { formatSoles, parseAmount } from '../lib/money'
@@ -40,7 +40,7 @@ function readImage(file) {
 }
 
 export default function AhorrosPage() {
-  const { account, addAhorro, updateAhorro, addAhorroDeposit, removeAhorro } = useFinanzas()
+  const { account, addAhorro, updateAhorro, addAhorroDeposit, removeAhorroDeposit, removeAhorro } = useFinanzas()
   const items = account.data.ahorros
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
@@ -52,6 +52,7 @@ export default function AhorrosPage() {
   const [depositOpen, setDepositOpen] = useState(false)
 
   const [historyAhorroId, setHistoryAhorroId] = useState(null)
+  const [confirmDepositId, setConfirmDepositId] = useState(null)
 
   function closeForm() {
     setFormOpen(false)
@@ -122,6 +123,13 @@ export default function AhorrosPage() {
 
   function closeHistory() {
     setHistoryAhorroId(null)
+    setConfirmDepositId(null)
+  }
+
+  function removeDeposit(entry) {
+    if (!historyAhorroId || !entry?.id) return
+    removeAhorroDeposit(historyAhorroId, entry.id)
+    setConfirmDepositId(null)
   }
 
   const historyItem = historyAhorroId ? items.find((item) => item.id === historyAhorroId) : null
@@ -288,15 +296,46 @@ export default function AhorrosPage() {
               {(historyItem.history || []).length === 0 && (
                 <p className="text-[15px] text-[var(--fnz-muted)]">Sin movimientos registrados.</p>
               )}
-              {(historyItem.history || []).map((entry) => (
+              {(historyItem.history || []).length > 0 && (
+                <p className="text-[13px] text-[var(--fnz-muted)]">
+                  Si te equivocaste de meta o de monto, puedes quitar el aporte. Se resta de esta meta.
+                </p>
+              )}
+              {[...(historyItem.history || [])].slice().reverse().map((entry) => (
                 <div key={entry.id} className="rounded-2xl bg-[var(--fnz-input)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[15px] font-semibold text-[var(--fnz-text)]">+{formatSoles(entry.amount)}</p>
-                    <p className="text-[13px] text-[var(--fnz-muted)]">{formatDate(entry.date)}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-semibold text-[var(--fnz-text)]">+{formatSoles(entry.amount)}</p>
+                      <p className="mt-0.5 text-[13px] text-[var(--fnz-muted)]">{formatDate(entry.date)}</p>
+                      {entry.source ? (
+                        <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{entry.source}</p>
+                      ) : null}
+                    </div>
+                    {entry.id && confirmDepositId !== entry.id ? (
+                      <button
+                        type="button"
+                        className={btnDanger}
+                        onClick={() => setConfirmDepositId(entry.id)}
+                      >
+                        Quitar
+                      </button>
+                    ) : null}
                   </div>
-                  {entry.source && (
-                    <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{entry.source}</p>
-                  )}
+                  {confirmDepositId === entry.id ? (
+                    <div className="mt-3 border-t border-[var(--fnz-line)] pt-3">
+                      <p className="text-[13px] text-[var(--fnz-muted)]">
+                        ¿Quitar {formatSoles(entry.amount)} de esta meta?
+                      </p>
+                      <div className="mt-2 flex gap-3">
+                        <button type="button" className={btnDanger} onClick={() => removeDeposit(entry)}>
+                          Sí, quitar
+                        </button>
+                        <button type="button" className={btnText} onClick={() => setConfirmDepositId(null)}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

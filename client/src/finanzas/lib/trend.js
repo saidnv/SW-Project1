@@ -1,4 +1,4 @@
-import { currentMonthKey, monthEndMs, monthKey, monthRange, addMonths } from './dates'
+import { currentMonthKey, monthEndMs, monthKey, monthRange, addMonths, parseLocalDate, formatMonthShort, todayInputValue } from './dates'
 import { isPagoPaid } from './pagos'
 import { openPeriod } from './period'
 import { sumAmounts } from './money'
@@ -97,60 +97,133 @@ export function buildMonthlyTrend(data, monthsCount = 6) {
   return { points, hasData }
 }
 
+function goalUnrecordedBase(goal) {
+  const amount = Number(goal.amount) || 0
+  const historySum = (goal.history || []).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+  return Number((amount - historySum).toFixed(2))
+}
+
+function goalProgressEvents(goal) {
+  const events = []
+  const base = goalUnrecordedBase(goal)
+  if (Math.abs(base) > 0.009) {
+    events.push({
+      amount: base,
+      source: 'Monto inicial',
+      date: goal.createdAt || nowIsoFallback(),
+    })
+  }
+  for (const entry of goal.history || []) {
+    events.push({
+      amount: Number(entry.amount) || 0,
+      source: String(entry.source || '').trim(),
+      date: entry.date,
+    })
+  }
+  return events.sort((a, b) => timeOf(a.date) - timeOf(b.date))
+}
+
+function nowIsoFallback() {
+  return new Date().toISOString()
+}
+
+function localDayKey(iso) {
+  const date = parseLocalDate(iso)
+  if (!date) return todayInputValue()
+  return todayInputValue(date)
+}
+
+function goalTargetFor(goal, createdKey, key) {
+  const goalAmount = Number(goal.goalAmount) || 0
+  if (goalAmount > 0) return goalAmount
+  const monthlyTarget = Number(goal.monthlyTarget) || 0
+  if (monthlyTarget <= 0) return 0
+  const monthsOpen = monthSpan(createdKey, key) + 1
+  return monthlyTarget * Math.max(monthsOpen, 0)
+}
+
+function goalPointLabel(month, date, isContribution) {
+  const monthLabel = formatMonthShort(month)
+  if (!isContribution) return monthLabel
+  const parsed = parseLocalDate(date)
+  if (!parsed) return monthLabel
+  return `${monthLabel} · ${parsed.getDate()}`
+}
+
+function makeGoalPoint({ id, key, actual, goal, increment = 0, source = '', date, isContribution = false }) {
+  const remaining = goal > 0 ? Number(Math.max(0, goal - actual).toFixed(2)) : null
+  const axisKey = date ? localDayKey(date) : key
+  return {
+    id,
+    key: axisKey,
+    label: goalPointLabel(key, date, isContribution || Boolean(date)),
+    actual: Number(actual.toFixed(2)),
+    goal: Number(goal.toFixed(2)),
+    increment: Number((increment || 0).toFixed(2)),
+    source,
+    remaining,
+    reached: goal > 0 && actual >= goal,
+  }
+}
+
 export function buildGoalTrend(goal, monthsCount = 6) {
   const endKey = currentMonthKey()
-  const createdKey = monthKey(goal.createdAt)
+  const createdKey = monthKey(goal.createdAt) || endKey
   const minKey = addMonths(endKey, -(monthsCount - 1))
   const startKey = createdKey < minKey ? minKey : createdKey
   const keys = monthRange(startKey, endKey)
-  const amount = Number(goal.amount) || 0
-  const goalAmount = Number(goal.goalAmount) || 0
-  const monthlyTarget = Number(goal.monthlyTarget) || 0
+  const events = goalProgressEvents(goal)
 
-  const points = keys.map((key) => {
-    const started = key >= createdKey
-    const monthsOpen = monthSpan(createdKey, key) + 1
-    const planned = monthlyTarget > 0 ? monthlyTarget * Math.max(monthsOpen, 0) : 0
-    const target = goalAmount > 0 ? goalAmount : planned
-    return {
-      key,
-      actual: started ? amount : 0,
-      goal: started ? target : 0,
+  let running = 0
+  for (const entry of events) {
+    if ((monthKeyOf(entry.date) || monthKey(entry.date)) < startKey) {
+      running = Number((running + (Number(entry.amount) || 0)).toFixed(2))
     }
-  })
-
-  const hasData = points.some((point) => point.actual > 0 || point.goal > 0)
-  return { points, hasData }
-}
-
-export function buildGoalDailyTrend(goal, maxDays = 60) {
-  const history = goal.history || []
-  const created = new Date(goal.createdAt)
-  created.setHours(0, 0, 0, 0)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const keys = []
-  const current = new Date(created)
-  while (current <= today && keys.length < maxDays) {
-    const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
-    keys.push(key)
-    current.setDate(current.getDate() + 1)
   }
 
-  const goalAmount = Number(goal.goalAmount) || 0
+  const points = []
+  for (const key of keys) {
+    const target = goalTargetFor(goal, createdKey, key)
+    const monthEvents = events.filter((entry) => (monthKeyOf(entry.date) || monthKey(entry.date)) === key)
 
-  const points = keys.map((key) => {
-    const dayEnd = new Date(key + 'T23:59:59.999Z')
-    const actual = history
-      .filter((entry) => new Date(entry.date).getTime() <= dayEnd.getTime())
-      .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
-    return {
-      key,
-      actual: Number(actual.toFixed(2)),
-      goal: goalAmount > 0 ? goalAmount : 0,
+    if (monthEvents.length) {
+      if (!points.length && running > 0.009) {
+        points.push(
+          makeGoalPoint({
+            id: `${key}-start`,
+            key,
+            actual: running,
+            goal: target,
+            date: monthEvents[0].date,
+          }),
+        )
+      }
+      monthEvents.forEach((entry, index) => {
+        running = Number((running + (Number(entry.amount) || 0)).toFixed(2))
+        points.push(
+          makeGoalPoint({
+            id: `${key}-${index}`,
+            key,
+            actual: running,
+            goal: target,
+            increment: entry.amount,
+            source: entry.source,
+            date: entry.date,
+            isContribution: true,
+          }),
+        )
+      })
+    } else {
+      points.push(
+        makeGoalPoint({
+          id: `${key}-close`,
+          key,
+          actual: running,
+          goal: target,
+        }),
+      )
     }
-  })
+  }
 
   const hasData = points.some((point) => point.actual > 0 || point.goal > 0)
   return { points, hasData }

@@ -21,15 +21,57 @@ function formatAxis(value) {
   return `S/ ${Math.round(value)}`
 }
 
-function linePath(points, xFor, yFor, key) {
-  return points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index)} ${yFor(point[key])}`)
+function coordsFor(points, xFor, yFor, key) {
+  return points.map((point, index) => ({ x: xFor(index), y: yFor(point[key]) }))
+}
+
+function straightPath(coords) {
+  return coords.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+}
+
+function steppedPath(coords) {
+  return coords
+    .map((point, index) => {
+      if (index === 0) return `M ${point.x} ${point.y}`
+      return `L ${point.x} ${coords[index - 1].y} L ${point.x} ${point.y}`
+    })
     .join(' ')
 }
 
-function areaPath(points, xFor, yFor, key, baseline) {
+function smoothPath(coords) {
+  if (coords.length < 2) return straightPath(coords)
+  if (coords.length === 2) {
+    const [start, end] = coords
+    const dx = (end.x - start.x) / 2
+    return `M ${start.x} ${start.y} C ${start.x + dx} ${start.y}, ${end.x - dx} ${end.y}, ${end.x} ${end.y}`
+  }
+
+  let path = `M ${coords[0].x} ${coords[0].y}`
+  for (let index = 0; index < coords.length - 1; index += 1) {
+    const previous = coords[index - 1] || coords[index]
+    const current = coords[index]
+    const next = coords[index + 1]
+    const after = coords[index + 2] || next
+    const cp1x = current.x + (next.x - previous.x) / 6
+    const cp1y = current.y + (next.y - previous.y) / 6
+    const cp2x = next.x - (after.x - current.x) / 6
+    const cp2y = next.y - (after.y - current.y) / 6
+    path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${next.x} ${next.y}`
+  }
+  return path
+}
+
+function linePath(points, xFor, yFor, key, style = 'straight') {
   if (!points.length) return ''
-  const top = linePath(points, xFor, yFor, key)
+  const coords = coordsFor(points, xFor, yFor, key)
+  if (style === 'stepped') return steppedPath(coords)
+  if (style === 'smooth') return smoothPath(coords)
+  return straightPath(coords)
+}
+
+function areaPath(points, xFor, yFor, key, baseline, style = 'straight') {
+  if (!points.length) return ''
+  const top = linePath(points, xFor, yFor, key, style)
   const last = points.length - 1
   return `${top} L ${xFor(last)} ${baseline} L ${xFor(0)} ${baseline} Z`
 }
@@ -39,12 +81,16 @@ export default function DualLineChart({
   title,
   footer,
   empty,
-  points,
+  points: rawPoints,
   hasData,
   series,
   extra,
   formatKey,
+  stepped = false,
+  smooth = false,
+  target = 0,
 }) {
+  const points = Array.isArray(rawPoints) ? rawPoints : []
   const [active, setActive] = useState(Math.max(points.length - 1, 0))
 
   useEffect(() => {
@@ -66,10 +112,19 @@ export default function DualLineChart({
       ...points.flatMap((point) => series.map((item) => Number(point[item.key]) || 0)),
       0,
     )
-    const maxY = niceMax(rawMax)
-    const ticks = [0, 0.5, 1].map((ratio) => maxY * ratio)
+    const ceiling = Number(target) || 0
+    let maxY
+    let ticks
+    if (ceiling > 0) {
+      maxY = Math.max(ceiling, rawMax)
+      if (rawMax > ceiling) maxY = rawMax * 1.08
+      ticks = rawMax > ceiling ? [0, ceiling, maxY] : [0, ceiling / 2, ceiling]
+    } else {
+      maxY = niceMax(rawMax)
+      ticks = [0, maxY / 2, maxY]
+    }
     return { width, height, padL, padR, padT, padB, maxY, ticks }
-  }, [points, series])
+  }, [points, series, target])
 
   const innerW = width - padL - padR
   const innerH = height - padT - padB
@@ -77,6 +132,7 @@ export default function DualLineChart({
   const xFor = (index) => padL + (points.length === 1 ? innerW / 2 : (index / lastIndex) * innerW)
   const yFor = (value) => padT + innerH - (value / maxY) * innerH
   const baseline = padT + innerH
+  const pathStyle = smooth ? 'smooth' : stepped ? 'stepped' : 'straight'
 
   if (!hasData) {
     return (
@@ -110,7 +166,7 @@ export default function DualLineChart({
       {selected && (
         <div className="mt-3 rounded-2xl bg-[var(--fnz-input)] px-3 py-3">
           <p className="text-[12px] text-[var(--fnz-muted)]">
-            {labelFormatter(selected.key)}
+            {selected.label || labelFormatter(selected.key)}
           </p>
           <div className={`mt-2 grid gap-2 ${series.length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {series.map((item) => (
@@ -122,6 +178,24 @@ export default function DualLineChart({
               </div>
             ))}
           </div>
+          {(Number(selected.increment) || 0) !== 0 && (
+            <p className="mt-2 text-[13px] leading-snug">
+              <span className={selected.increment > 0 ? 'text-[var(--fnz-success)]' : 'text-[var(--fnz-danger)]'}>
+                {selected.increment > 0 ? '+' : ''}
+                {formatSoles(selected.increment)}
+              </span>
+              {selected.source ? (
+                <span className="text-[var(--fnz-muted)]"> · {selected.source}</span>
+              ) : (
+                <span className="text-[var(--fnz-muted)]"> · aporte</span>
+              )}
+            </p>
+          )}
+          {selected.reached ? (
+            <p className="mt-2 text-[13px] font-medium text-[var(--fnz-success)]">Meta alcanzada</p>
+          ) : selected.remaining != null ? (
+            <p className="mt-2 text-[13px] text-[var(--fnz-muted)]">Faltan {formatSoles(selected.remaining)}</p>
+          ) : null}
         </div>
       )}
 
@@ -148,34 +222,44 @@ export default function DualLineChart({
             </g>
           ))}
 
-          {series.map((item) => (
-            <g key={item.key}>
-              <path d={areaPath(points, xFor, yFor, item.key, baseline)} fill={item.color} opacity="0.08" />
-              <path
-                d={linePath(points, xFor, yFor, item.key)}
-                fill="none"
-                stroke={item.color}
-                strokeWidth="2.5"
-                strokeDasharray={item.dashed ? '6 6' : undefined}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-            </g>
-          ))}
+          {series.map((item) => {
+            const showFill = item.fill ?? !item.dashed
+            return (
+              <g key={item.key}>
+                {showFill ? (
+                  <path d={areaPath(points, xFor, yFor, item.key, baseline, pathStyle)} fill={item.color} opacity="0.12" />
+                ) : null}
+                <path
+                  d={linePath(points, xFor, yFor, item.key, pathStyle)}
+                  fill="none"
+                  stroke={item.color}
+                  strokeWidth={item.dashed ? 2 : 2.75}
+                  strokeDasharray={item.dashed ? '6 6' : undefined}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </g>
+            )
+          })}
 
           {points.map((point, index) => (
-            <g key={point.key}>
-              {series.map((item) => (
-                <circle
-                  key={item.key}
-                  cx={xFor(index)}
-                  cy={yFor(point[item.key])}
-                  r={active === index ? 5 : 3.5}
-                  fill="var(--fnz-card)"
-                  stroke={item.color}
-                  strokeWidth="2"
-                />
-              ))}
+            <g key={point.id || point.key}>
+              {series.map((item) => {
+                const showMarkers = item.markers ?? !item.dashed
+                if (!showMarkers) return null
+                const jumped = (Number(point.increment) || 0) !== 0
+                return (
+                  <circle
+                    key={item.key}
+                    cx={xFor(index)}
+                    cy={yFor(point[item.key])}
+                    r={active === index ? 5.5 : jumped ? 4.5 : 3.5}
+                    fill={point.reached && item.key === 'actual' ? item.color : 'var(--fnz-card)'}
+                    stroke={item.color}
+                    strokeWidth="2"
+                  />
+                )
+              })}
               <text
                 x={xFor(index)}
                 y={height - 8}
@@ -184,7 +268,11 @@ export default function DualLineChart({
                 fontSize="11"
                 fontWeight={active === index ? 600 : 400}
               >
-                {labelFormatter(point.key)}
+                {active === index || point.key !== points[index - 1]?.key
+                  ? (points.length <= 8 || index === 0 || index === points.length - 1 || active === index
+                    ? labelFormatter(point.key)
+                    : '')
+                  : ''}
               </text>
               <rect
                 x={xFor(index) - innerW / points.length / 2}

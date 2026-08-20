@@ -108,14 +108,18 @@ function applyMonthClose(ledger) {
   }
 }
 
+function makeAhorroDeposit(amount, source, date = nowIso()) {
+  return {
+    id: createId(),
+    amount: Number(amount) || 0,
+    source: String(source || '').trim(),
+    date,
+  }
+}
+
 function applySurplus(ledger, amount, ahorroId, extraName) {
   if (ahorroId) {
-    const deposit = {
-      id: createId(),
-      amount: Number(amount) || 0,
-      source: 'Sobrante del mes',
-      date: nowIso(),
-    }
+    const deposit = makeAhorroDeposit(amount, 'Sobrante del mes')
     return {
       ...ledger,
       ahorros: ledger.ahorros.map((item) =>
@@ -130,6 +134,7 @@ function applySurplus(ledger, amount, ahorroId, extraName) {
       ),
     }
   }
+  const createdAt = nowIso()
   const item = {
     id: createId(),
     name: extraName || 'Ahorro del mes',
@@ -138,9 +143,9 @@ function applySurplus(ledger, amount, ahorroId, extraName) {
     monthlyTarget: 0,
     image: '',
     link: '',
-    history: [],
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    history: amount > 0 ? [makeAhorroDeposit(amount, 'Sobrante del mes', createdAt)] : [],
+    createdAt,
+    updatedAt: createdAt,
   }
   return { ...ledger, ahorros: [item, ...ledger.ahorros] }
 }
@@ -687,6 +692,7 @@ export default function FinanzasProvider({ children }) {
 
   const addAhorro = useCallback(
     ({ name, amount, goalAmount, monthlyTarget, image, link }) => {
+      const createdAt = nowIso()
       const item = {
         id: createId(),
         name,
@@ -695,9 +701,9 @@ export default function FinanzasProvider({ children }) {
         monthlyTarget: monthlyTarget || 0,
         image: image || '',
         link: link || '',
-        history: [],
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
+        history: amount > 0 ? [makeAhorroDeposit(amount, 'Monto inicial', createdAt)] : [],
+        createdAt,
+        updatedAt: createdAt,
       }
       updateLedger((ledger) => ({ ...ledger, ahorros: [item, ...ledger.ahorros] }))
     },
@@ -708,9 +714,18 @@ export default function FinanzasProvider({ children }) {
     (id, patch) => {
       updateLedger((ledger) => ({
         ...ledger,
-        ahorros: ledger.ahorros.map((item) =>
-          item.id === id ? { ...item, ...patch, updatedAt: nowIso() } : item,
-        ),
+        ahorros: ledger.ahorros.map((item) => {
+          if (item.id !== id) return item
+          const next = { ...item, ...patch, updatedAt: nowIso() }
+          if (patch.amount == null) return next
+          const delta = Number((Number(next.amount) - Number(item.amount || 0)).toFixed(2))
+          if (!delta) return next
+          next.history = [
+            ...(item.history || []),
+            makeAhorroDeposit(delta, 'Ajuste de monto'),
+          ]
+          return next
+        }),
       }))
     },
     [updateLedger],
@@ -719,12 +734,7 @@ export default function FinanzasProvider({ children }) {
   const addAhorroDeposit = useCallback(
     (ahorroId, { amount, source }) => {
       updateLedger((ledger) => {
-        const deposit = {
-          id: createId(),
-          amount: Number(amount) || 0,
-          source: String(source || '').trim(),
-          date: nowIso(),
-        }
+        const deposit = makeAhorroDeposit(amount, source)
         return {
           ...ledger,
           ahorros: ledger.ahorros.map((item) =>
@@ -739,6 +749,27 @@ export default function FinanzasProvider({ children }) {
           ),
         }
       })
+    },
+    [updateLedger],
+  )
+
+  const removeAhorroDeposit = useCallback(
+    (ahorroId, depositId) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        ahorros: ledger.ahorros.map((item) => {
+          if (item.id !== ahorroId) return item
+          const history = item.history || []
+          const entry = history.find((row) => row.id === depositId)
+          if (!entry) return item
+          return {
+            ...item,
+            amount: Number(Math.max(0, item.amount - (Number(entry.amount) || 0)).toFixed(2)),
+            history: history.filter((row) => row.id !== depositId),
+            updatedAt: nowIso(),
+          }
+        }),
+      }))
     },
     [updateLedger],
   )
@@ -980,6 +1011,7 @@ export default function FinanzasProvider({ children }) {
     addAhorro,
     updateAhorro,
     addAhorroDeposit,
+    removeAhorroDeposit,
     removeAhorro,
     addPrestamo,
     updatePrestamo,

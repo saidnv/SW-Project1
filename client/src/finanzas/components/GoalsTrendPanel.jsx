@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
+import { formatDayShort, formatMonthShort } from '../lib/dates'
 import { formatSoles } from '../lib/money'
-import { buildGoalDailyTrend, buildGoalTrend } from '../lib/trend'
+import { buildGoalTrend } from '../lib/trend'
 import DualLineChart from './DualLineChart'
+import ProgressBar from './ProgressBar'
 import { card } from './ui'
 
 const SERIES = [
@@ -9,14 +11,18 @@ const SERIES = [
   { key: 'goal', label: 'Meta', color: 'var(--fnz-success)', dashed: true },
 ]
 
+function formatGoalAxis(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDayShort(value)
+  return formatMonthShort(value)
+}
+
 export default function GoalsTrendPanel({ goals }) {
   const [selectedId, setSelectedId] = useState(null)
-  const [daily, setDaily] = useState(false)
   const selected = goals.find((item) => item.id === selectedId) ?? null
   const trend = useMemo(() => {
     if (!selected) return { points: [], hasData: false }
-    return daily ? buildGoalDailyTrend(selected) : buildGoalTrend(selected)
-  }, [selected, daily])
+    return buildGoalTrend(selected)
+  }, [selected])
 
   if (!goals.length) {
     return (
@@ -31,11 +37,15 @@ export default function GoalsTrendPanel({ goals }) {
   }
 
   if (selected) {
-    const pct = selected.goalAmount ? Math.round((selected.amount / selected.goalAmount) * 100) : null
+    const goalAmount = Number(selected.goalAmount) || 0
+    const saved = Number(selected.amount) || 0
+    const pct = goalAmount ? Math.round((saved / goalAmount) * 100) : null
+    const remaining = goalAmount ? Math.max(0, goalAmount - saved) : null
+    const reached = goalAmount > 0 && saved >= goalAmount
     return (
       <DualLineChart
         extra={
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-3 space-y-3">
             <button
               type="button"
               onClick={() => setSelectedId(null)}
@@ -43,13 +53,12 @@ export default function GoalsTrendPanel({ goals }) {
             >
               ← Ver metas
             </button>
-            <button
-              type="button"
-              onClick={() => setDaily((current) => !current)}
-              className="text-[14px] font-medium text-[var(--fnz-muted)]"
-            >
-              {daily ? 'Ver mensual' : 'Ver por día'}
-            </button>
+            {goalAmount > 0 ? (
+              <ProgressBar
+                value={pct}
+                label={reached ? 'Meta alcanzada' : `Faltan ${formatSoles(remaining)}`}
+              />
+            ) : null}
           </div>
         }
         eyebrow="Meta seleccionada"
@@ -57,12 +66,15 @@ export default function GoalsTrendPanel({ goals }) {
         points={trend.points}
         hasData={trend.hasData}
         series={SERIES}
+        formatKey={formatGoalAxis}
+        target={goalAmount}
         empty="Esta meta aún no tiene montos para graficar."
-        formatKey={daily ? formatDayShort : undefined}
         footer={
-          pct != null
-            ? `Llevas ${formatSoles(selected.amount)} de ${formatSoles(selected.goalAmount)} (${pct}%). La línea punteada es la meta.`
-            : `Llevas ${formatSoles(selected.amount)}. La línea punteada es el ritmo u objetivo de la meta.`
+          reached
+            ? `Llegaste a ${formatSoles(saved)}. Cada punto es un aporte.`
+            : goalAmount
+              ? `La línea verde de arriba es la meta (${formatSoles(goalAmount)}). La azul une cada aporte hasta ese tope.`
+              : `Llevas ${formatSoles(saved)}. Cada punto es un aporte.`
         }
       />
     )
@@ -72,7 +84,7 @@ export default function GoalsTrendPanel({ goals }) {
     <div className={card}>
       <p className="text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Metas</p>
       <h3 className="mt-1 text-[20px] font-semibold tracking-tight text-[var(--fnz-text)]">Avance por meta</h3>
-      <p className="mt-1 text-[14px] text-[var(--fnz-muted)]">Toca una tarjeta para ver su gráfico mes a mes.</p>
+      <p className="mt-1 text-[14px] text-[var(--fnz-muted)]">Toca una tarjeta para ver cómo el ahorro sube hacia la meta.</p>
 
       <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-3">
         {goals.map((goal) => {
@@ -81,7 +93,7 @@ export default function GoalsTrendPanel({ goals }) {
             <button
               key={goal.id}
               type="button"
-              onClick={() => { setSelectedId(goal.id); setDaily(false) }}
+              onClick={() => setSelectedId(goal.id)}
               className="rounded-2xl bg-[var(--fnz-input)] p-3 text-left transition hover:-translate-y-0.5"
             >
               {goal.image ? (
