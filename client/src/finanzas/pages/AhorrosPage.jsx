@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import Field, { inputClass } from '../components/Field'
 import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
+import ShareGoalModal, { AddMembersModal } from '../components/ShareGoalModal'
 import { btnDanger, btnPrimary, btnText, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
 import { formatDate } from '../lib/dates'
 import { formatSoles, parseAmount } from '../lib/money'
+import { isAhorroOwner, isSharedAhorro, memberLabel, samePerson } from '../lib/sharedAhorro'
 
 const emptyForm = {
   name: '',
@@ -40,7 +42,19 @@ function readImage(file) {
 }
 
 export default function AhorrosPage() {
-  const { account, addAhorro, updateAhorro, addAhorroDeposit, removeAhorroDeposit, removeAhorro } = useFinanzas()
+  const {
+    account,
+    addAhorro,
+    updateAhorro,
+    addAhorroDeposit,
+    removeAhorroDeposit,
+    removeAhorro,
+    shareAhorro,
+    addAhorroMembers,
+    removeAhorroMember,
+    listDirectory,
+    refreshAccount,
+  } = useFinanzas()
   const items = account.data.ahorros
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
@@ -53,6 +67,33 @@ export default function AhorrosPage() {
 
   const [historyAhorroId, setHistoryAhorroId] = useState(null)
   const [confirmDepositId, setConfirmDepositId] = useState(null)
+
+  const [sharePrompt, setSharePrompt] = useState(null)
+  const [addMembersFor, setAddMembersFor] = useState(null)
+  const [directory, setDirectory] = useState([])
+
+  useEffect(() => {
+    refreshAccount()
+    listDirectory()
+      .then(setDirectory)
+      .catch(() => setDirectory([]))
+
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAccount()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [listDirectory, refreshAccount])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (formOpen || depositOpen || sharePrompt || addMembersFor || historyAhorroId) return
+      refreshAccount()
+    }, 8000)
+    return () => clearInterval(timer)
+  }, [addMembersFor, depositOpen, formOpen, historyAhorroId, refreshAccount, sharePrompt])
+
+  const otherUsers = directory.filter((user) => !samePerson(user, account))
 
   function closeForm() {
     setFormOpen(false)
@@ -77,10 +118,12 @@ export default function AhorrosPage() {
     }
     if (editingId) {
       updateAhorro(editingId, payload)
-    } else {
-      addAhorro(payload)
+      closeForm()
+      return
     }
+    const created = addAhorro(payload)
     closeForm()
+    if (created?.id) setSharePrompt({ id: created.id, name: created.name })
   }
 
   function startEdit(item) {
@@ -133,6 +176,12 @@ export default function AhorrosPage() {
   }
 
   const historyItem = historyAhorroId ? items.find((item) => item.id === historyAhorroId) : null
+  const addMembersItem = addMembersFor ? items.find((item) => item.id === addMembersFor) : null
+  const inviteCandidates = addMembersItem
+    ? otherUsers.filter(
+        (user) => !(addMembersItem.members || []).some((member) => samePerson(member, user)),
+      )
+    : otherUsers
 
   async function onImage(event) {
     try {
@@ -197,6 +246,8 @@ export default function AhorrosPage() {
       <ul className="space-y-3">
         {items.map((item) => {
           const pct = item.goalAmount ? (item.amount / item.goalAmount) * 100 : 0
+          const shared = isSharedAhorro(item)
+          const owner = isAhorroOwner(item, account)
           return (
             <li key={item.id} className={card}>
               <div className="flex gap-4">
@@ -208,8 +259,21 @@ export default function AhorrosPage() {
                     <button type="button" onClick={() => openHistory(item)} className="text-left">
                       <p className="text-[17px] font-semibold text-[var(--fnz-text)]">{item.name}</p>
                     </button>
-                    <RowMenu onEdit={() => startEdit(item)} onDelete={() => removeAhorro(item.id)} />
+                    <RowMenu
+                      onEdit={() => startEdit(item)}
+                      onDelete={owner ? () => removeAhorro(item.id) : undefined}
+                    />
                   </div>
+                  {shared ? (
+                    <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">
+                      <span className="rounded-full bg-[var(--fnz-accent-soft)] px-2 py-0.5 font-semibold text-[var(--fnz-accent)]">
+                        Compartida
+                      </span>
+                      <span className="ml-2">{memberLabel(item)}</span>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">Personal</p>
+                  )}
                   <p className="mt-1 text-[22px] font-bold tabular-nums text-[var(--fnz-accent)]">
                     {formatSoles(item.amount)}
                     {item.goalAmount ? (
@@ -229,11 +293,42 @@ export default function AhorrosPage() {
                       <ProgressBar value={pct} label="Avance de la meta" />
                     </div>
                   )}
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                     <button type="button" onClick={() => openDeposit(item)} className={btnText}>
                       + Agregar dinero
                     </button>
+                    {shared ? (
+                      <button type="button" onClick={() => setAddMembersFor(item.id)} className={btnText}>
+                        + Agregar persona
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSharePrompt({ id: item.id, name: item.name })}
+                        className={btnText}
+                      >
+                        Hacer compartida
+                      </button>
+                    )}
                   </div>
+                  {shared && owner && (item.members || []).length > 1 ? (
+                    <ul className="mt-3 space-y-1">
+                      {(item.members || [])
+                        .filter((member) => member.id !== item.ownerId)
+                        .map((member) => (
+                          <li key={member.id} className="flex items-center justify-between gap-2 text-[13px]">
+                            <span className="text-[var(--fnz-muted)]">{member.username}</span>
+                            <button
+                              type="button"
+                              className={btnDanger}
+                              onClick={() => removeAhorroMember(item.id, member.id)}
+                            >
+                              Quitar
+                            </button>
+                          </li>
+                        ))}
+                    </ul>
+                  ) : null}
                 </div>
               </div>
             </li>
@@ -307,6 +402,9 @@ export default function AhorrosPage() {
                     <div className="min-w-0">
                       <p className="text-[15px] font-semibold text-[var(--fnz-text)]">+{formatSoles(entry.amount)}</p>
                       <p className="mt-0.5 text-[13px] text-[var(--fnz-muted)]">{formatDate(entry.date)}</p>
+                      {entry.byUsername ? (
+                        <p className="mt-1 text-[13px] font-medium text-[var(--fnz-text)]">{entry.byUsername}</p>
+                      ) : null}
                       {entry.source ? (
                         <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{entry.source}</p>
                       ) : null}
@@ -342,6 +440,30 @@ export default function AhorrosPage() {
           </div>
         </div>
       )}
+
+      {sharePrompt ? (
+        <ShareGoalModal
+          name={sharePrompt.name}
+          users={otherUsers}
+          onPersonal={() => setSharePrompt(null)}
+          onShared={(users) => {
+            shareAhorro(sharePrompt.id, users)
+            setSharePrompt(null)
+          }}
+        />
+      ) : null}
+
+      {addMembersItem ? (
+        <AddMembersModal
+          name={addMembersItem.name}
+          users={inviteCandidates}
+          onAdd={(users) => {
+            addAhorroMembers(addMembersItem.id, users)
+            setAddMembersFor(null)
+          }}
+          onClose={() => setAddMembersFor(null)}
+        />
+      ) : null}
     </section>
   )
 }

@@ -136,6 +136,97 @@ function normalizeLedger(data) {
   }
 }
 
+function samePerson(member, account) {
+  if (!member || !account) return false
+  if (member.id && account.id && member.id === account.id) return true
+  return String(member.username || '').toLowerCase() === String(account.username || '').toLowerCase()
+}
+
+function isAhorroMember(ahorro, account) {
+  return (ahorro.members || []).some((member) => samePerson(member, account))
+}
+
+function isAhorroOwner(ahorro, account) {
+  return samePerson({ id: ahorro.ownerId, username: ahorro.ownerUsername }, account)
+}
+
+function upsertAhorro(data, ahorro) {
+  const ledger = normalizeLedger(data)
+  const exists = ledger.ahorros.some((row) => row.id === ahorro.id)
+  ledger.ahorros = exists
+    ? ledger.ahorros.map((row) => (row.id === ahorro.id ? ahorro : row))
+    : [ahorro, ...ledger.ahorros]
+  return ledger
+}
+
+function stripAhorro(data, id) {
+  const ledger = normalizeLedger(data)
+  ledger.ahorros = ledger.ahorros.filter((row) => row.id !== id)
+  return ledger
+}
+
+function mergeIncomingShared(account, others) {
+  const ledger = normalizeLedger(account.data)
+  const byId = new Map()
+  for (const ahorro of ledger.ahorros.filter((item) => item.shared)) {
+    if (ahorro.id) byId.set(ahorro.id, ahorro)
+  }
+  for (const row of others) {
+    for (const ahorro of row.data?.ahorros || []) {
+      if (!ahorro?.shared || !ahorro.id || !isAhorroMember(ahorro, account)) continue
+      const existing = byId.get(ahorro.id)
+      if (!existing || String(ahorro.updatedAt || '') >= String(existing.updatedAt || '')) {
+        byId.set(ahorro.id, ahorro)
+      }
+    }
+  }
+  const personal = ledger.ahorros.filter((item) => !item.shared)
+  return { ...ledger, ahorros: [...byId.values(), ...personal] }
+}
+
+async function accountWithShared(row) {
+  const { rows } = await pool.query('SELECT id, username, data FROM accounts WHERE id <> $1', [row.id])
+  return publicAccount({ ...row, data: mergeIncomingShared(row, rows) })
+}
+
+async function fanOutSharedAhorros(writer, previousData, nextLedger) {
+  const prevAhorros = Array.isArray(previousData?.ahorros) ? previousData.ahorros : []
+  const nextAhorros = nextLedger.ahorros || []
+  const nextShared = nextAhorros.filter((item) => item.shared)
+  const nextIds = new Set(nextAhorros.map((item) => item.id))
+  const deletedOwned = prevAhorros.filter(
+    (item) => item.shared && isAhorroOwner(item, writer) && !nextIds.has(item.id),
+  )
+  if (!nextShared.length && !deletedOwned.length) return
+
+  const { rows } = await pool.query('SELECT id, username, data FROM accounts WHERE id <> $1', [writer.id])
+  for (const row of rows) {
+    let data = row.data
+    let changed = false
+    for (const ahorro of nextShared) {
+      if (isAhorroMember(ahorro, row)) {
+        data = upsertAhorro(data, ahorro)
+        changed = true
+      } else if ((data?.ahorros || []).some((item) => item.id === ahorro.id)) {
+        data = stripAhorro(data, ahorro.id)
+        changed = true
+      }
+    }
+    for (const ahorro of deletedOwned) {
+      if ((data?.ahorros || []).some((item) => item.id === ahorro.id)) {
+        data = stripAhorro(data, ahorro.id)
+        changed = true
+      }
+    }
+    if (changed) {
+      await pool.query('UPDATE accounts SET data = $1::jsonb WHERE id = $2', [
+        JSON.stringify(normalizeLedger(data)),
+        row.id,
+      ])
+    }
+  }
+}
+
 const app = express()
 const corsOptions = {
   origin: CLIENT_ORIGINS.length === 1 ? CLIENT_ORIGINS[0] : CLIENT_ORIGINS,
@@ -194,7 +285,7 @@ app.post('/api/auth/register', async (req, res, next) => {
     )
     const account = created.rows[0]
     const token = await createSession(account.id)
-    res.json({ ok: true, token, account: publicAccount(account) })
+    res.json({ ok: true, token, account: await accountWithShared(account) })
   } catch (error) {
     next(error)
   }
@@ -214,7 +305,7 @@ app.post('/api/auth/login', async (req, res, next) => {
       return
     }
     const token = await createSession(account.id)
-    res.json({ ok: true, token, account: publicAccount(account) })
+    res.json({ ok: true, token, account: await accountWithShared(account) })
   } catch (error) {
     next(error)
   }
@@ -232,8 +323,30 @@ app.post('/api/auth/logout', async (req, res, next) => {
   }
 })
 
-app.get('/api/me', requireAccount, (req, res) => {
-  res.json({ ok: true, account: publicAccount(req.account) })
+app.get('/api/me', requireAccount, async (req, res, next) => {
+  try {
+    res.json({ ok: true, account: await accountWithShared(req.account) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/directory', requireAccount, async (_req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, created_at FROM accounts ORDER BY username ASC',
+    )
+    res.json({
+      ok: true,
+      accounts: rows.map((row) => ({
+        id: row.id,
+        username: row.username,
+        createdAt: row.created_at,
+      })),
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/admin/accounts', requireAdmin, async (_req, res, next) => {
@@ -283,7 +396,9 @@ app.put('/api/ledger', requireAccount, async (req, res, next) => {
        RETURNING id, username, created_at, data`,
       [JSON.stringify(data), req.account.id],
     )
-    res.json({ ok: true, account: publicAccount(updated.rows[0]) })
+    const account = updated.rows[0]
+    await fanOutSharedAhorros(account, req.account.data, data)
+    res.json({ ok: true, account: await accountWithShared(account) })
   } catch (error) {
     next(error)
   }

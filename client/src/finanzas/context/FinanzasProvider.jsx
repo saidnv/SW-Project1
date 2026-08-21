@@ -11,6 +11,7 @@ import { loanInterestAmount, loanTotal, openLoans, poolAfterRemovingLoan } from 
 import {
   clearApiToken,
   fetchAdminAccounts,
+  fetchDirectory,
   fetchMe,
   isLedgerEmpty,
   loginAccount,
@@ -28,6 +29,13 @@ import {
   saveSessionId,
   saveStore,
 } from '../lib/storage'
+import {
+  applySharedDeletions,
+  isAhorroOwner,
+  makeSharedAhorro,
+  syncSharedAhorrosInStore,
+  withAddedMembers,
+} from '../lib/sharedAhorro'
 import { FinanzasContext } from './FinanzasContext'
 
 function withHydrated(account) {
@@ -108,18 +116,19 @@ function applyMonthClose(ledger) {
   }
 }
 
-function makeAhorroDeposit(amount, source, date = nowIso()) {
+function makeAhorroDeposit(amount, source, date = nowIso(), byUsername = '') {
   return {
     id: createId(),
     amount: Number(amount) || 0,
     source: String(source || '').trim(),
     date,
+    ...(byUsername ? { byUsername } : {}),
   }
 }
 
-function applySurplus(ledger, amount, ahorroId, extraName) {
+function applySurplus(ledger, amount, ahorroId, extraName, byUsername = '') {
   if (ahorroId) {
-    const deposit = makeAhorroDeposit(amount, 'Sobrante del mes')
+    const deposit = makeAhorroDeposit(amount, 'Sobrante del mes', nowIso(), byUsername)
     return {
       ...ledger,
       ahorros: ledger.ahorros.map((item) =>
@@ -143,7 +152,7 @@ function applySurplus(ledger, amount, ahorroId, extraName) {
     monthlyTarget: 0,
     image: '',
     link: '',
-    history: amount > 0 ? [makeAhorroDeposit(amount, 'Sobrante del mes', createdAt)] : [],
+    history: amount > 0 ? [makeAhorroDeposit(amount, 'Sobrante del mes', createdAt, byUsername)] : [],
     createdAt,
     updatedAt: createdAt,
   }
@@ -233,11 +242,15 @@ export default function FinanzasProvider({ children }) {
       if (!account) return
       const current = hydrateLedger(cloneLedger(account.data))
       const next = hydrateLedger(updater(current) || current)
-      const nextStore = {
+      let nextStore = {
         ...store,
         accounts: store.accounts.map((item) =>
           item.id === account.id ? { ...item, data: next } : item,
         ),
+      }
+      if (!usingApiRef.current) {
+        nextStore = syncSharedAhorrosInStore(nextStore, account.id)
+        nextStore = applySharedDeletions(nextStore, account.id, current.ahorros)
       }
       persist(nextStore)
       return next
@@ -693,6 +706,7 @@ export default function FinanzasProvider({ children }) {
   const addAhorro = useCallback(
     ({ name, amount, goalAmount, monthlyTarget, image, link }) => {
       const createdAt = nowIso()
+      const byUsername = account?.username || ''
       const item = {
         id: createId(),
         name,
@@ -701,17 +715,20 @@ export default function FinanzasProvider({ children }) {
         monthlyTarget: monthlyTarget || 0,
         image: image || '',
         link: link || '',
-        history: amount > 0 ? [makeAhorroDeposit(amount, 'Monto inicial', createdAt)] : [],
+        shared: false,
+        history: amount > 0 ? [makeAhorroDeposit(amount, 'Monto inicial', createdAt, byUsername)] : [],
         createdAt,
         updatedAt: createdAt,
       }
       updateLedger((ledger) => ({ ...ledger, ahorros: [item, ...ledger.ahorros] }))
+      return item
     },
-    [updateLedger],
+    [account, updateLedger],
   )
 
   const updateAhorro = useCallback(
     (id, patch) => {
+      const byUsername = account?.username || ''
       updateLedger((ledger) => ({
         ...ledger,
         ahorros: ledger.ahorros.map((item) => {
@@ -722,19 +739,19 @@ export default function FinanzasProvider({ children }) {
           if (!delta) return next
           next.history = [
             ...(item.history || []),
-            makeAhorroDeposit(delta, 'Ajuste de monto'),
+            makeAhorroDeposit(delta, 'Ajuste de monto', nowIso(), byUsername),
           ]
           return next
         }),
       }))
     },
-    [updateLedger],
+    [account, updateLedger],
   )
 
   const addAhorroDeposit = useCallback(
     (ahorroId, { amount, source }) => {
       updateLedger((ledger) => {
-        const deposit = makeAhorroDeposit(amount, source)
+        const deposit = makeAhorroDeposit(amount, source, nowIso(), account?.username || '')
         return {
           ...ledger,
           ahorros: ledger.ahorros.map((item) =>
@@ -750,7 +767,7 @@ export default function FinanzasProvider({ children }) {
         }
       })
     },
-    [updateLedger],
+    [account, updateLedger],
   )
 
   const removeAhorroDeposit = useCallback(
@@ -776,9 +793,59 @@ export default function FinanzasProvider({ children }) {
 
   const removeAhorro = useCallback(
     (id) => {
+      updateLedger((ledger) => {
+        const item = ledger.ahorros.find((row) => row.id === id)
+        if (item?.shared && account && !isAhorroOwner(item, account)) return ledger
+        return {
+          ...ledger,
+          ahorros: ledger.ahorros.filter((row) => row.id !== id),
+        }
+      })
+    },
+    [account, updateLedger],
+  )
+
+  const shareAhorro = useCallback(
+    (id, users = []) => {
+      if (!account) return
       updateLedger((ledger) => ({
         ...ledger,
-        ahorros: ledger.ahorros.filter((row) => row.id !== id),
+        ahorros: ledger.ahorros.map((item) => {
+          if (item.id !== id) return item
+          const shared = item.shared ? item : makeSharedAhorro(item, account)
+          return { ...withAddedMembers(shared, users), updatedAt: nowIso() }
+        }),
+      }))
+    },
+    [account, updateLedger],
+  )
+
+  const addAhorroMembers = useCallback(
+    (id, users) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        ahorros: ledger.ahorros.map((item) => {
+          if (item.id !== id || !item.shared) return item
+          return { ...withAddedMembers(item, users), updatedAt: nowIso() }
+        }),
+      }))
+    },
+    [updateLedger],
+  )
+
+  const removeAhorroMember = useCallback(
+    (id, memberId) => {
+      updateLedger((ledger) => ({
+        ...ledger,
+        ahorros: ledger.ahorros.map((item) => {
+          if (item.id !== id || !item.shared) return item
+          if (item.ownerId === memberId) return item
+          return {
+            ...item,
+            members: (item.members || []).filter((member) => member.id !== memberId),
+            updatedAt: nowIso(),
+          }
+        }),
       }))
     },
     [updateLedger],
@@ -884,12 +951,12 @@ export default function FinanzasProvider({ children }) {
       const shouldClose = pendingCloseRef.current
       pendingCloseRef.current = false
       updateLedger((ledger) => {
-        const withSurplus = applySurplus(ledger, amount, ahorroId, extraName)
+        const withSurplus = applySurplus(ledger, amount, ahorroId, extraName, account?.username || '')
         return shouldClose ? applyMonthClose(withSurplus) : withSurplus
       })
       setSurplusPrompt(null)
     },
-    [surplusPrompt, updateLedger],
+    [account, surplusPrompt, updateLedger],
   )
 
   const dismissSurplus = useCallback(() => {
@@ -915,6 +982,30 @@ export default function FinanzasProvider({ children }) {
       isAdmin: isAdminUsername(item.username),
     }))
   }, [store.accounts])
+
+  const listDirectory = useCallback(async () => {
+    if (usingApiRef.current) {
+      const payload = await fetchDirectory()
+      return payload.accounts || []
+    }
+    return store.accounts.map((item) => ({
+      id: item.id,
+      username: item.username,
+    }))
+  }, [store.accounts])
+
+  const refreshAccount = useCallback(async () => {
+    if (!usingApiRef.current) return
+    try {
+      const payload = await fetchMe()
+      const next = withHydrated(payload.account)
+      setStore({ accounts: [next] })
+      setSessionId(next.id)
+      saveSessionId(next.id)
+    } catch (error) {
+      console.error(error)
+    }
+  }, [])
 
   const deleteUser = useCallback(
     async (id) => {
@@ -1013,6 +1104,9 @@ export default function FinanzasProvider({ children }) {
     addAhorroDeposit,
     removeAhorroDeposit,
     removeAhorro,
+    shareAhorro,
+    addAhorroMembers,
+    removeAhorroMember,
     addPrestamo,
     updatePrestamo,
     removePrestamo,
@@ -1022,6 +1116,8 @@ export default function FinanzasProvider({ children }) {
     dismissSurplus,
     closeMonth,
     listUsers,
+    listDirectory,
+    refreshAccount,
     deleteUser,
   }
 

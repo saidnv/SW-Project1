@@ -43,16 +43,18 @@ export default function RowMenu({ onEdit, onDelete, tone = 'default' }) {
           >
             Editar
           </button>
-          <button
-            type="button"
-            className="block w-full px-4 py-2.5 text-left text-[15px] text-[var(--fnz-danger)] hover:bg-[var(--fnz-input)]"
-            onClick={() => {
-              setOpen(false)
-              onDelete()
-            }}
-          >
-            Eliminar
-          </button>
+          {onDelete ? (
+            <button
+              type="button"
+              className="block w-full px-4 py-2.5 text-left text-[15px] text-[var(--fnz-danger)] hover:bg-[var(--fnz-input)]"
+              onClick={() => {
+                setOpen(false)
+                onDelete()
+              }}
+            >
+              Eliminar
+            </button>
+          ) : null}
         </div>
       )}
     </div>

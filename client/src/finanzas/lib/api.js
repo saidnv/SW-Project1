@@ -87,6 +87,10 @@ export function isLedgerEmpty(data) {
   )
 }
 
+export function fetchDirectory() {
+  return request('/api/directory')
+}
+
 export function fetchAdminAccounts() {
   return request('/api/admin/accounts')
 }
