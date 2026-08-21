@@ -6,6 +6,7 @@ import KabinPanel from './components/KabinPanel'
 import MelodyGuide from './components/MelodyGuide'
 import SurplusModal from './components/SurplusModal'
 import AuthScreen from './pages/AuthScreen'
+import { openReceivedLoans } from './lib/prestamos'
 
 const NAV = [
   { to: '/finanzas', label: 'Resumen', shortLabel: 'Resumen', end: true, section: 'resumen' },
@@ -243,7 +244,10 @@ export default function FinanzasLayout() {
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const section = sectionFromPath(location.pathname)
-  const navItems = NAV.filter((item) => item.section === 'resumen' || isSectionVisible(item.section))
+  const hasLoanDebts = openReceivedLoans(account?.data?.prestamosRecibidos).length > 0
+  const navItems = NAV.filter(
+    (item) => item.section === 'resumen' || isSectionVisible(item.section) || (item.section === 'deudas' && hasLoanDebts),
+  )
   const initial = (account?.username || 'K').slice(0, 1).toUpperCase()
   const kitty = theme === 'kitty'
 
@@ -294,8 +298,9 @@ export default function FinanzasLayout() {
     )
   }
 
-  if (section !== 'resumen' && section !== 'ajustes' && !isSectionVisible(section)) {
-    return <Navigate to="/finanzas" replace />
+  if (section !== 'resumen' && section !== 'ajustes') {
+    const allowed = isSectionVisible(section) || (section === 'deudas' && hasLoanDebts)
+    if (!allowed) return <Navigate to="/finanzas" replace />
   }
 
   return (

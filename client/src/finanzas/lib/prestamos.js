@@ -96,6 +96,12 @@ export function openReceivedLoans(list) {
   return (list || []).filter((loan) => isLinkedLoan(loan) && !isLoanCollected(loan))
 }
 
+export function receivedLoanDebtTotal(list) {
+  return Number(
+    openReceivedLoans(list).reduce((sum, loan) => sum + loanOwed(loan), 0).toFixed(2),
+  )
+}
+
 export function dueHeadline(loan) {
   const state = loanDueState(loan)
   const total = formatSoles(loanTotal(loan))

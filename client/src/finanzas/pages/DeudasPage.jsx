@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import AmountBadge from '../components/AmountBadge'
 import Field, { inputClass } from '../components/Field'
 import KindFields, { emptyKindForm } from '../components/KindFields'
+import LoanClaimModal from '../components/LoanClaimModal'
 import MonthHistory from '../components/MonthHistory'
 import PlasticCard from '../components/PlasticCard'
 import ProgressBar from '../components/ProgressBar'
+import { ReceivedLoanDebtRow, ReceivedLoanHistory } from '../components/ReceivedLoansPanel'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
 import { DEFAULT_CARD_COLOR, isTarjeta, kindLabel, kindOf } from '../lib/kinds'
 import { formatSoles, parseAmount, sumAmounts } from '../lib/money'
+import { loanOwed, openReceivedLoans, receivedLoanDebtTotal } from '../lib/prestamos'
 
 function paidPct(item) {
   if (!item.originalAmount) return 0
@@ -18,14 +21,28 @@ function paidPct(item) {
 }
 
 export default function DeudasPage() {
-  const { account, addDeuda, updateDeuda, removeDeuda } = useFinanzas()
+  const { account, addDeuda, updateDeuda, removeDeuda, claimLoanPayment, refreshAccount } = useFinanzas()
   const items = account.data.deudas
+  const receivedLoans = account.data.prestamosRecibidos || []
+  const loanDebts = openReceivedLoans(receivedLoans)
+  const loanDebtTotal = receivedLoanDebtTotal(receivedLoans)
+  const pendingTotal = Number((sumAmounts(items) + loanDebtTotal).toFixed(2))
   const creditos = account.data.creditos
   const tarjetaCreditos = creditos.filter((item) => isTarjeta(item))
   const [form, setForm] = useState({ ...emptyKindForm, creditoId: '' })
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
-  const amounts = items.map((item) => item.amount)
+  const [claiming, setClaiming] = useState(null)
+  const amounts = [...items.map((item) => item.amount), ...loanDebts.map((loan) => loanOwed(loan))]
+
+  useEffect(() => {
+    refreshAccount()
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAccount()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [refreshAccount])
 
   function closeForm() {
     setFormOpen(false)
@@ -86,7 +103,13 @@ export default function DeudasPage() {
         title="Deudas totales"
         subtitle={
           <>
-            Saldo pendiente: <span className="font-semibold text-[var(--fnz-danger)]">{formatSoles(sumAmounts(items))}</span>
+            Saldo pendiente: <span className="font-semibold text-[var(--fnz-danger)]">{formatSoles(pendingTotal)}</span>
+            {loanDebtTotal > 0 ? (
+              <>
+                {' '}
+                · préstamos <span className="font-semibold text-[var(--fnz-danger)]">{formatSoles(loanDebtTotal)}</span>
+              </>
+            ) : null}
           </>
         }
       />
@@ -131,6 +154,9 @@ export default function DeudasPage() {
       </AddFormPanel>
 
       <ul className="space-y-3">
+        {loanDebts.map((loan) => (
+          <ReceivedLoanDebtRow key={loan.id} loan={loan} onClaim={setClaiming} amounts={amounts} />
+        ))}
         {items.map((item) =>
           isTarjeta(item) ? (
             <li key={item.id}>
@@ -169,8 +195,23 @@ export default function DeudasPage() {
             </li>
           ),
         )}
-        {!items.length && <p className={empty}>No hay deudas registradas.</p>}
+        {!items.length && !loanDebts.length && <p className={empty}>No hay deudas registradas.</p>}
       </ul>
+
+      <ReceivedLoanHistory loans={receivedLoans} />
+
+      {claiming ? (
+        <LoanClaimModal
+          loan={claiming}
+          onClose={() => setClaiming(null)}
+          onConfirm={(payload) => {
+            const result = claimLoanPayment(claiming.id, payload)
+            if (!result.ok) return result
+            setClaiming(null)
+            return result
+          }}
+        />
+      ) : null}
 
       <div>
         <h3 className="mb-3 px-1 text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Historial por mes</h3>

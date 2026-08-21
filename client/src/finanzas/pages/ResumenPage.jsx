@@ -55,8 +55,10 @@ export default function ResumenPage() {
   const showDeudas = isSectionVisible('deudas')
   const showAhorros = isSectionVisible('ahorros')
   const showPrestamos = isSectionVisible('prestamos')
+  const hasLoanDebt = (totals.deudasPrestamos || 0) > 0
+  const showDeudasBlock = showDeudas || hasLoanDebt
   const trendSeries = [
-    showDeudas ? { key: 'deudas', label: 'Deudas', color: 'var(--fnz-danger)' } : null,
+    showDeudasBlock ? { key: 'deudas', label: 'Deudas', color: 'var(--fnz-danger)' } : null,
     showAhorros ? { key: 'ahorros', label: 'Ahorros', color: 'var(--fnz-accent)' } : null,
   ].filter(Boolean)
   const trendHasData = trend.points.some((point) =>
@@ -76,8 +78,25 @@ export default function ResumenPage() {
         {isSectionVisible('creditos') ? (
           <Stat label="Líneas o créditos" value={formatSoles(totals.creditos)} to="/finanzas/creditos" />
         ) : null}
-        {showDeudas ? (
-          <Stat label="Deudas totales" value={formatSoles(totals.deudas)} to="/finanzas/deudas" accent="text-[var(--fnz-danger)]" />
+        {showDeudasBlock ? (
+          <Stat
+            label="Deudas totales"
+            value={formatSoles(totals.deudasTotales ?? totals.deudas)}
+            to="/finanzas/deudas"
+            accent="text-[var(--fnz-danger)]"
+            hint={hasLoanDebt ? `Préstamos ${formatSoles(totals.deudasPrestamos)}` : undefined}
+            hintTone={hasLoanDebt ? 'bg-rose-50 text-[var(--fnz-danger)]' : undefined}
+          />
+        ) : null}
+        {hasLoanDebt ? (
+          <Stat
+            label="Deuda de préstamos"
+            value={formatSoles(totals.deudasPrestamos)}
+            to="/finanzas/deudas"
+            accent="text-[var(--fnz-danger)]"
+            hint="Te prestaron usuarios del sistema"
+            hintTone="bg-rose-50 text-[var(--fnz-danger)]"
+          />
         ) : null}
         {isSectionVisible('pagos') ? (
           <Stat

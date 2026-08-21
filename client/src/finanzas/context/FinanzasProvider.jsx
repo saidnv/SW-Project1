@@ -37,7 +37,7 @@ import {
   withAddedMembers,
 } from '../lib/sharedAhorro'
 import { applyLinkedLoanDeletions, makeLinkedLoan, syncLinkedLoansInStore } from '../lib/linkedLoans'
-import { isLinkedLoan, loanInterestAmount, loanOwed, loanTotal, openLoans, pendingLoanClaim, poolAfterRemovingLoan } from '../lib/prestamos'
+import { isLinkedLoan, loanInterestAmount, loanOwed, loanTotal, openLoans, pendingLoanClaim, poolAfterRemovingLoan, receivedLoanDebtTotal } from '../lib/prestamos'
 import { FinanzasContext } from './FinanzasContext'
 
 function withHydrated(account) {
@@ -94,7 +94,7 @@ function applyMonthClose(ledger) {
     totals: {
       pagos: sumAmounts(periodPagos),
       ingresos: sumAmounts(periodIngresos),
-      deudas: sumAmounts(ledger.deudas),
+      deudas: Number((sumAmounts(ledger.deudas) + receivedLoanDebtTotal(ledger.prestamosRecibidos)).toFixed(2)),
       ahorros: sumAmounts(ledger.ahorros),
       remainder: Number((sumAmounts(periodIngresos) - sumAmounts(periodPagos)).toFixed(2)),
     },
@@ -1214,6 +1214,8 @@ export default function FinanzasProvider({ children }) {
       periodKey: month,
       creditos: sumAmounts(data.creditos),
       deudas: sumAmounts(data.deudas),
+      deudasPrestamos: receivedLoanDebtTotal(data.prestamosRecibidos),
+      deudasTotales: Number((sumAmounts(data.deudas) + receivedLoanDebtTotal(data.prestamosRecibidos)).toFixed(2)),
       pagos: sumAmounts(paidPagos(data.pagos)),
       pagosMes: totalPagos,
       pagosPendientesMes: totalPendientes,

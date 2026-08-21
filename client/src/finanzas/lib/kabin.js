@@ -1,7 +1,7 @@
 import { formatSoles, sumAmounts } from './money'
 import { paidPagos } from './pagos'
 import { inPeriod, openPeriod } from './period'
-import { dueAlertLoans, dueHeadline, remainingToLend } from './prestamos'
+import { dueAlertLoans, dueHeadline, remainingToLend, loanOwed, openReceivedLoans, receivedLoanDebtTotal } from './prestamos'
 
 export function getKabinGuide(section) {
   const guides = {
@@ -17,6 +17,7 @@ export function getKabinGuide(section) {
     deudas: [
       'Separa tipo y nombre. Una deuda de tarjeta también se ve como card.',
       'La barra de progreso sube cuando marcas pagos ligados a esa deuda.',
+      'Si un usuario del sistema te prestó, esa deuda aparece aquí con el detalle del préstamo.',
     ],
     pagos: [
       'Crea el pago mensual como pendiente: aún no se descuenta de la deuda.',
@@ -84,7 +85,7 @@ export function getPrimaryKabinMessage(messages) {
 }
 
 export function getKabinAdvice(data, persona = 'Kabin') {
-  const { creditos, deudas, pagos, ingresos, ahorros, prestamos = [] } = data
+  const { creditos, deudas, pagos, ingresos, ahorros, prestamos = [], prestamosRecibidos = [] } = data
   const melody = persona === 'My Melody'
   const month = openPeriod(data)
   const ingresosMes = ingresos.filter((item) => inPeriod(item, month))
@@ -94,13 +95,15 @@ export function getKabinAdvice(data, persona = 'Kabin') {
   const remainder = totalIngresos - totalPagos
   const totalAhorros = sumAmounts(ahorros)
   const totalCreditos = sumAmounts(creditos)
-  const totalDeudas = sumAmounts(deudas)
+  const receivedOpen = openReceivedLoans(prestamosRecibidos)
+  const loanDebt = receivedLoanDebtTotal(prestamosRecibidos)
+  const totalDeudas = Number((sumAmounts(deudas) + loanDebt).toFixed(2))
   const dueLoans = dueAlertLoans(prestamos)
   const leftoverLend = remainingToLend(data.prestamoDisponible, prestamos)
 
   const messages = []
 
-  if (!ingresosMes.length && !pagos.length && !deudas.length && !prestamos.length) {
+  if (!ingresosMes.length && !pagos.length && !deudas.length && !prestamos.length && !receivedOpen.length) {
     messages.push({
       id: 'welcome',
       tone: 'info',
@@ -123,6 +126,20 @@ export function getKabinAdvice(data, persona = 'Kabin') {
       body: melody
         ? `Mira el resumen: ${dueHeadline(first)}. Con cariño, cobra a tiempo y guarda la constancia.`
         : `${dueHeadline(first)}. Revisa la constancia en Préstamos.`,
+    })
+  }
+
+  const dueReceived = dueAlertLoans(receivedOpen)
+  if (dueReceived.length) {
+    const first = dueReceived[0]
+    messages.push({
+      id: `loan-owed-${first.id}-${first.dueDate}`,
+      tone: 'alert',
+      important: true,
+      title: melody ? 'Tienes un préstamo por pagar' : 'Deuda de préstamo por vencer',
+      body: melody
+        ? `Le debes ${formatSoles(loanOwed(first))} a ${first.lenderUsername}. Aparece en Deudas.`
+        : `Debes ${formatSoles(loanOwed(first))} a ${first.lenderUsername}. Está en Deudas.`,
     })
   }
 
@@ -188,7 +205,12 @@ export function getKabinAdvice(data, persona = 'Kabin') {
   }
 
   if (totalDeudas > 0) {
-    const biggest = [...deudas].sort((a, b) => b.amount - a.amount)[0]
+    const loanRows = receivedOpen.map((loan) => ({
+      id: loan.id,
+      name: `Préstamo de ${loan.lenderUsername}`,
+      amount: loanOwed(loan),
+    }))
+    const biggest = [...deudas, ...loanRows].sort((a, b) => b.amount - a.amount)[0]
     messages.push({
       id: `debt-${biggest.id}`,
       tone: 'info',

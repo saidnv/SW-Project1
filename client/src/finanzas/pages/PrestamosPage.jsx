@@ -173,7 +173,7 @@ export default function PrestamosPage() {
     <section className="space-y-5">
       <PageHeader
         title="Préstamos"
-        subtitle="Dinero que prestas. Si vinculas a un usuario del sistema, esa persona lo verá en Pagos hasta que confirmes el cobro."
+        subtitle="Dinero que prestas. Si vinculas a un usuario del sistema, esa persona lo verá en Deudas hasta que confirmes el cobro."
       />
 
       <div className="grid grid-cols-2 gap-2">
@@ -284,7 +284,7 @@ export default function PrestamosPage() {
                 </button>
               </div>
               <p className="text-[13px] text-[var(--fnz-muted)]">
-                Si es un usuario de aquí, verá la deuda en Pagos y tú confirmarás cuando pague.
+                Si es un usuario de aquí, verá la deuda en Deudas y tú confirmarás cuando pague.
               </p>
             </div>
           ) : null}

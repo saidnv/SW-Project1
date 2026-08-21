@@ -2,7 +2,7 @@ import { currentMonthKey, monthEndMs, monthKey, monthRange, addMonths, parseLoca
 import { isPagoPaid } from './pagos'
 import { openPeriod } from './period'
 import { sumAmounts } from './money'
-import { loanTotal, isLoanCollected } from './prestamos'
+import { loanTotal, isLoanCollected, isLinkedLoan, receivedLoanDebtTotal } from './prestamos'
 
 function timeOf(iso) {
   const value = new Date(iso).getTime()
@@ -69,7 +69,7 @@ export function buildMonthlyTrend(data, monthsCount = 6) {
     if (key === period) {
       return {
         key,
-        deudas: sumAmounts(deudas),
+        deudas: Number((sumAmounts(deudas) + receivedLoanDebtTotal(data.prestamosRecibidos)).toFixed(2)),
         ahorros: sumAmounts(ahorros),
       }
     }
@@ -83,12 +83,21 @@ export function buildMonthlyTrend(data, monthsCount = 6) {
         .reduce((sum, pago) => sum + (Number(pago.appliedAmount) || Number(pago.amount) || 0), 0)
       return total + Math.max(0, original - paid)
     }, 0)
+    const loanDebt = (data.prestamosRecibidos || []).reduce((total, loan) => {
+      if (!isLinkedLoan(loan)) return total
+      if (timeOf(loan.createdAt) > endMs) return total
+      if (loan.collected && timeOf(loan.collectedAt) <= endMs) return total
+      const paid = (loan.paymentHistory || [])
+        .filter((entry) => timeOf(entry.date || entry.createdAt) <= endMs)
+        .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+      return total + Math.max(0, loanTotal(loan) - paid)
+    }, 0)
     const ahorrosTotal = ahorros
       .filter((item) => timeOf(item.createdAt) <= endMs)
       .reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
     return {
       key,
-      deudas: Number(deudasTotal.toFixed(2)),
+      deudas: Number((deudasTotal + loanDebt).toFixed(2)),
       ahorros: Number(ahorrosTotal.toFixed(2)),
     }
   })
