@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { THEMES } from '../lib/theme'
+import { HIDEABLE_SECTIONS } from '../lib/sections'
 import { useTheme } from '../context/ThemeContext'
 import { useFinanzas } from '../context/FinanzasContext'
 import { btnDanger, card, PageHeader } from '../components/ui'
@@ -134,16 +135,53 @@ function UsersAdmin() {
 
 export default function AjustesPage() {
   const { theme, setTheme } = useTheme()
-  const { isAdmin } = useFinanzas()
+  const { isAdmin, isSectionVisible, setSectionHidden } = useFinanzas()
 
   return (
     <section className="space-y-5">
       <PageHeader
         title="Ajustes"
-        subtitle="Cambia la temática de Finanzas. El resto de tus datos se queda igual."
+        subtitle="Oculta módulos que no uses y cambia la temática. Tus datos se quedan igual."
       />
 
       {isAdmin ? <UsersAdmin /> : null}
+
+      <div className={card}>
+        <h3 className="text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Secciones visibles</h3>
+        <p className="mt-1 text-[14px] text-[var(--fnz-muted)]">
+          Si ocultas un módulo, desaparece del menú y de las tarjetas del resumen. Puedes volver a
+          mostrarlo cuando quieras; no se borra nada.
+        </p>
+        <ul className="mt-4 divide-y divide-[var(--fnz-line)]">
+          {HIDEABLE_SECTIONS.map((item) => {
+            const visible = isSectionVisible(item.id)
+            return (
+              <li key={item.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-[16px] font-semibold text-[var(--fnz-text)]">{item.label}</p>
+                  <p className="text-[13px] text-[var(--fnz-muted)]">{visible ? 'Visible' : 'Oculta'}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={visible}
+                  aria-label={`${visible ? 'Ocultar' : 'Mostrar'} ${item.label}`}
+                  onClick={() => setSectionHidden(item.id, visible)}
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition ${
+                    visible ? 'bg-[var(--fnz-accent)]' : 'bg-[var(--fnz-input)]'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-sm transition ${
+                      visible ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
 
       <div className={card}>
         <h3 className="text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Tema</h3>

@@ -46,7 +46,11 @@ export function todayInputValue(date = new Date()) {
 }
 
 export function monthKey(iso = nowIso()) {
-  const date = new Date(iso)
+  const date = iso ? new Date(iso) : new Date()
+  if (!Number.isFinite(date.getTime())) {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 

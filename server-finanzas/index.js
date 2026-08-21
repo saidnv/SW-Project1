@@ -20,11 +20,13 @@ const emptyLedger = {
   pagos: [],
   ingresos: [],
   ahorros: [],
-  prestamos: [],
-  prestamoDisponible: 0,
+    prestamos: [],
+    prestamosRecibidos: [],
+    prestamoDisponible: 0,
   history: [],
   closedMonths: [],
   periodKey: null,
+  hiddenSections: [],
 }
 
 function publicAccount(row) {
@@ -129,10 +131,14 @@ function normalizeLedger(data) {
     ingresos: Array.isArray(source.ingresos) ? source.ingresos : [],
     ahorros: Array.isArray(source.ahorros) ? source.ahorros : [],
     prestamos: Array.isArray(source.prestamos) ? source.prestamos : [],
+    prestamosRecibidos: Array.isArray(source.prestamosRecibidos) ? source.prestamosRecibidos : [],
     prestamoDisponible: Number(source.prestamoDisponible) || 0,
     history: Array.isArray(source.history) ? source.history.slice(0, 120) : [],
     closedMonths: Array.isArray(source.closedMonths) ? source.closedMonths : [],
     periodKey: typeof source.periodKey === 'string' && source.periodKey ? source.periodKey : null,
+    hiddenSections: Array.isArray(source.hiddenSections)
+      ? [...new Set(source.hiddenSections.filter((id) => typeof id === 'string'))]
+      : [],
   }
 }
 
@@ -165,12 +171,62 @@ function stripAhorro(data, id) {
   return ledger
 }
 
+function isLinkedLoan(loan) {
+  return Boolean(loan?.linked && (loan.borrowerId || loan.borrowerUsername))
+}
+
+function isLoanLender(loan, account) {
+  return samePerson({ id: loan.lenderId, username: loan.lenderUsername }, account)
+}
+
+function isLoanBorrower(loan, account) {
+  return samePerson({ id: loan.borrowerId, username: loan.borrowerUsername }, account)
+}
+
+function upsertList(list, item) {
+  const current = Array.isArray(list) ? list : []
+  const exists = current.some((row) => row.id === item.id)
+  return exists ? current.map((row) => (row.id === item.id ? item : row)) : [item, ...current]
+}
+
+function upsertPrestamoRow(data, loan) {
+  const ledger = normalizeLedger(data)
+  ledger.prestamos = upsertList(ledger.prestamos, loan)
+  return ledger
+}
+
+function upsertRecibidoRow(data, loan) {
+  const ledger = normalizeLedger(data)
+  ledger.prestamosRecibidos = upsertList(ledger.prestamosRecibidos, loan)
+  return ledger
+}
+
+function stripRecibidoRow(data, id) {
+  const ledger = normalizeLedger(data)
+  ledger.prestamosRecibidos = ledger.prestamosRecibidos.filter((row) => row.id !== id)
+  return ledger
+}
+
+function newerLoan(current, incoming) {
+  if (!current) return incoming
+  return String(incoming.updatedAt || '') >= String(current.updatedAt || '') ? incoming : current
+}
+
 function mergeIncomingShared(account, others) {
   const ledger = normalizeLedger(account.data)
   const byId = new Map()
   for (const ahorro of ledger.ahorros.filter((item) => item.shared)) {
     if (ahorro.id) byId.set(ahorro.id, ahorro)
   }
+  const received = new Map()
+  for (const loan of ledger.prestamosRecibidos || []) {
+    if (loan.id) received.set(loan.id, loan)
+  }
+  const lent = new Map()
+  for (const loan of ledger.prestamos || []) {
+    if (loan.id) lent.set(loan.id, loan)
+  }
+
   for (const row of others) {
     for (const ahorro of row.data?.ahorros || []) {
       if (!ahorro?.shared || !ahorro.id || !isAhorroMember(ahorro, account)) continue
@@ -179,14 +235,72 @@ function mergeIncomingShared(account, others) {
         byId.set(ahorro.id, ahorro)
       }
     }
+    for (const loan of row.data?.prestamos || []) {
+      if (!isLinkedLoan(loan) || !loan.id || !isLoanBorrower(loan, account)) continue
+      received.set(loan.id, newerLoan(received.get(loan.id), loan))
+    }
+    for (const loan of row.data?.prestamosRecibidos || []) {
+      if (!isLinkedLoan(loan) || !loan.id || !isLoanLender(loan, account)) continue
+      lent.set(loan.id, newerLoan(lent.get(loan.id), loan))
+    }
   }
+
   const personal = ledger.ahorros.filter((item) => !item.shared)
-  return { ...ledger, ahorros: [...byId.values(), ...personal] }
+  const external = (ledger.prestamos || []).filter((item) => !isLinkedLoan(item))
+  const linkedLent = [...lent.values()].filter((item) => isLinkedLoan(item) && isLoanLender(item, account))
+  return {
+    ...ledger,
+    ahorros: [...byId.values(), ...personal],
+    prestamos: [...linkedLent, ...external],
+    prestamosRecibidos: [...received.values()],
+  }
 }
 
 async function accountWithShared(row) {
   const { rows } = await pool.query('SELECT id, username, data FROM accounts WHERE id <> $1', [row.id])
   return publicAccount({ ...row, data: mergeIncomingShared(row, rows) })
+}
+
+async function fanOutLinkedLoans(writer, previousData, nextLedger) {
+  const nextLent = (nextLedger.prestamos || []).filter(isLinkedLoan)
+  const prevLent = (previousData?.prestamos || []).filter(isLinkedLoan)
+  const nextIds = new Set((nextLedger.prestamos || []).map((item) => item.id))
+  const deleted = prevLent.filter((item) => isLoanLender(item, writer) && !nextIds.has(item.id))
+  const received = nextLedger.prestamosRecibidos || []
+  if (!nextLent.length && !received.length && !deleted.length) return
+
+  const { rows } = await pool.query('SELECT id, username, data FROM accounts WHERE id <> $1', [writer.id])
+  for (const row of rows) {
+    let data = row.data
+    let changed = false
+    for (const loan of nextLent) {
+      if (isLoanBorrower(loan, row)) {
+        data = upsertRecibidoRow(data, loan)
+        changed = true
+      } else if ((data?.prestamosRecibidos || []).some((item) => item.id === loan.id)) {
+        data = stripRecibidoRow(data, loan.id)
+        changed = true
+      }
+    }
+    for (const loan of received) {
+      if (isLoanLender(loan, row)) {
+        data = upsertPrestamoRow(data, loan)
+        changed = true
+      }
+    }
+    for (const loan of deleted) {
+      if ((data?.prestamosRecibidos || []).some((item) => item.id === loan.id)) {
+        data = stripRecibidoRow(data, loan.id)
+        changed = true
+      }
+    }
+    if (changed) {
+      await pool.query('UPDATE accounts SET data = $1::jsonb WHERE id = $2', [
+        JSON.stringify(normalizeLedger(data)),
+        row.id,
+      ])
+    }
+  }
 }
 
 async function fanOutSharedAhorros(writer, previousData, nextLedger) {
@@ -398,6 +512,7 @@ app.put('/api/ledger', requireAccount, async (req, res, next) => {
     )
     const account = updated.rows[0]
     await fanOutSharedAhorros(account, req.account.data, data)
+    await fanOutLinkedLoans(account, req.account.data, data)
     res.json({ ok: true, account: await accountWithShared(account) })
   } catch (error) {
     next(error)

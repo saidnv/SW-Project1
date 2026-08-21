@@ -3,8 +3,8 @@ import AddFormPanel from '../components/AddFormPanel'
 import Field, { inputClass } from '../components/Field'
 import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
-import ShareGoalModal, { AddMembersModal } from '../components/ShareGoalModal'
-import { btnDanger, btnPrimary, btnText, card, empty, PageHeader } from '../components/ui'
+import ShareGoalModal, { AddMembersModal, UserPicker } from '../components/ShareGoalModal'
+import { btnDanger, btnPrimary, btnSecondary, btnText, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
 import { formatDate } from '../lib/dates'
 import { formatSoles, parseAmount } from '../lib/money'
@@ -71,6 +71,9 @@ export default function AhorrosPage() {
   const [sharePrompt, setSharePrompt] = useState(null)
   const [addMembersFor, setAddMembersFor] = useState(null)
   const [directory, setDirectory] = useState([])
+  const [createType, setCreateType] = useState(null)
+  const [pendingMembers, setPendingMembers] = useState([])
+  const [memberStep, setMemberStep] = useState(false)
 
   useEffect(() => {
     refreshAccount()
@@ -100,6 +103,25 @@ export default function AhorrosPage() {
     setEditingId(null)
     setForm(emptyForm)
     setError('')
+    setCreateType(null)
+    setPendingMembers([])
+    setMemberStep(false)
+  }
+
+  function openCreate() {
+    setEditingId(null)
+    setForm(emptyForm)
+    setError('')
+    setCreateType(null)
+    setPendingMembers([])
+    setMemberStep(false)
+    setFormOpen(true)
+  }
+
+  function togglePendingMember(id) {
+    setPendingMembers((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
   }
 
   async function submit(event) {
@@ -121,9 +143,12 @@ export default function AhorrosPage() {
       closeForm()
       return
     }
-    const created = addAhorro(payload)
+    addAhorro({
+      ...payload,
+      shared: createType === 'shared',
+      members: otherUsers.filter((user) => pendingMembers.includes(user.id)),
+    })
     closeForm()
-    if (created?.id) setSharePrompt({ id: created.id, name: created.name })
   }
 
   function startEdit(item) {
@@ -202,12 +227,88 @@ export default function AhorrosPage() {
       <AddFormPanel
         open={formOpen}
         editing={Boolean(editingId)}
-        addLabel="Agregar meta"
+        addLabel={
+          createType === 'shared'
+            ? 'Nueva meta compartida'
+            : createType === 'personal'
+              ? 'Nueva meta personal'
+              : 'Agregar meta'
+        }
         editLabel="Editar meta"
-        onOpen={() => setFormOpen(true)}
+        onOpen={openCreate}
         onClose={closeForm}
       >
+        {!editingId && !createType ? (
+          <div className="space-y-3">
+            <p className="text-[15px] leading-relaxed text-[var(--fnz-muted)]">
+              Primero elige si esta meta es solo tuya o si otras personas también podrán verla y
+              agregar dinero.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCreateType('personal')
+                setMemberStep(false)
+              }}
+              className={`${btnPrimary} w-full`}
+            >
+              Personal
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCreateType('shared')
+                setMemberStep(true)
+              }}
+              className={`${btnSecondary} w-full`}
+            >
+              Compartida
+            </button>
+            <p className="text-[13px] leading-relaxed text-[var(--fnz-muted)]">
+              Personal: solo tú. Compartida: puedes agregar a otras cuentas; todas ven el mismo
+              ahorro.
+            </p>
+          </div>
+        ) : !editingId && createType === 'shared' && memberStep ? (
+          <div>
+            <p className="text-[15px] leading-relaxed text-[var(--fnz-muted)]">
+              Elige quiénes verán y alimentarán esta meta. Puedes agregar más después.
+            </p>
+            <UserPicker
+              users={otherUsers}
+              selectedIds={pendingMembers}
+              onToggle={togglePendingMember}
+              emptyText="Aún no hay otras cuentas. Puedes crear la meta compartida ahora y agregar personas después."
+            />
+            <div className="mt-4 flex flex-col gap-2">
+              <button type="button" onClick={() => setMemberStep(false)} className={`${btnPrimary} w-full`}>
+                {pendingMembers.length ? 'Continuar' : 'Continuar sin agregar ahora'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateType(null)
+                  setPendingMembers([])
+                  setMemberStep(false)
+                }}
+                className={`${btnText} w-full`}
+              >
+                Volver
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
+          {!editingId && createType === 'shared' ? (
+            <p className="text-[14px] text-[var(--fnz-muted)] sm:col-span-2">
+              {pendingMembers.length
+                ? `Compartida con ${otherUsers
+                    .filter((user) => pendingMembers.includes(user.id))
+                    .map((user) => user.username)
+                    .join(', ')}.`
+                : 'Meta compartida. Podrás agregar personas después.'}
+            </p>
+          ) : null}
           <Field label="Tipo o nombre">
             <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
@@ -241,11 +342,14 @@ export default function AhorrosPage() {
             )}
           </div>
         </form>
+        )}
       </AddFormPanel>
 
       <ul className="space-y-3">
         {items.map((item) => {
-          const pct = item.goalAmount ? (item.amount / item.goalAmount) * 100 : 0
+          const goalAmount = Number(item.goalAmount) || 0
+          const saved = Number(item.amount) || 0
+          const pct = goalAmount > 0 ? (saved / goalAmount) * 100 : 0
           const shared = isSharedAhorro(item)
           const owner = isAhorroOwner(item, account)
           return (
@@ -275,9 +379,9 @@ export default function AhorrosPage() {
                     <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">Personal</p>
                   )}
                   <p className="mt-1 text-[22px] font-bold tabular-nums text-[var(--fnz-accent)]">
-                    {formatSoles(item.amount)}
-                    {item.goalAmount ? (
-                      <span className="text-[15px] font-medium text-[var(--fnz-muted)]"> de {formatSoles(item.goalAmount)}</span>
+                    {formatSoles(saved)}
+                    {goalAmount ? (
+                      <span className="text-[15px] font-medium text-[var(--fnz-muted)]"> de {formatSoles(goalAmount)}</span>
                     ) : null}
                   </p>
                   {item.monthlyTarget > 0 && (
@@ -288,7 +392,7 @@ export default function AhorrosPage() {
                       Abrir enlace
                     </a>
                   )}
-                  {item.goalAmount > 0 && (
+                  {goalAmount > 0 && (
                     <div className="mt-3">
                       <ProgressBar value={pct} label="Avance de la meta" />
                     </div>

@@ -55,7 +55,7 @@ const SECTION_TITLES = {
   pagos: 'Pagos mensuales',
   ingresos: 'Ingresos',
   ahorros: 'Ahorros',
-  prestamos: "Préstamos Bésame m'de",
+  prestamos: 'Préstamos',
   ajustes: 'Ajustes',
 }
 

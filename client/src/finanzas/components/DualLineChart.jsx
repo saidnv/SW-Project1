@@ -3,6 +3,20 @@ import { formatMonthShort } from '../lib/dates'
 import { formatSoles } from '../lib/money'
 import { card } from './ui'
 
+function useNarrow(breakpoint = 640) {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : true,
+  )
+  useEffect(() => {
+    function onResize() {
+      setNarrow(window.innerWidth < breakpoint)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [breakpoint])
+  return narrow
+}
+
 function niceMax(value) {
   if (value <= 0) return 100
   const padded = value * 1.15
@@ -92,6 +106,7 @@ export default function DualLineChart({
 }) {
   const points = Array.isArray(rawPoints) ? rawPoints : []
   const [active, setActive] = useState(Math.max(points.length - 1, 0))
+  const narrow = useNarrow()
 
   useEffect(() => {
     setActive(Math.max(points.length - 1, 0))
@@ -101,13 +116,14 @@ export default function DualLineChart({
 
   const labelFormatter = formatKey || formatMonthShort
 
-  const { width, height, padL, padR, padT, padB, maxY, ticks } = useMemo(() => {
-    const width = 640
-    const height = 240
-    const padL = 58
-    const padR = 16
+  const { width, height, padL, padR, padT, padB, maxY, ticks, fontSize } = useMemo(() => {
+    const width = narrow ? 360 : 640
+    const height = narrow ? 230 : 240
+    const padL = narrow ? 46 : 58
+    const padR = narrow ? 12 : 16
     const padT = 16
-    const padB = 32
+    const padB = narrow ? 36 : 32
+    const fontSize = narrow ? 13 : 11
     const rawMax = Math.max(
       ...points.flatMap((point) => series.map((item) => Number(point[item.key]) || 0)),
       0,
@@ -123,16 +139,22 @@ export default function DualLineChart({
       maxY = niceMax(rawMax)
       ticks = [0, maxY / 2, maxY]
     }
-    return { width, height, padL, padR, padT, padB, maxY, ticks }
-  }, [points, series, target])
+    if (!maxY || !Number.isFinite(maxY)) maxY = 100
+    return { width, height, padL, padR, padT, padB, maxY, ticks, fontSize }
+  }, [narrow, points, series, target])
 
   const innerW = width - padL - padR
   const innerH = height - padT - padB
   const lastIndex = Math.max(points.length - 1, 1)
   const xFor = (index) => padL + (points.length === 1 ? innerW / 2 : (index / lastIndex) * innerW)
-  const yFor = (value) => padT + innerH - (value / maxY) * innerH
+  const yFor = (value) => padT + innerH - ((Number(value) || 0) / maxY) * innerH
   const baseline = padT + innerH
   const pathStyle = smooth ? 'smooth' : stepped ? 'stepped' : 'straight'
+  const markerR = (index, jumped) => {
+    if (active === index) return narrow ? 7 : 5.5
+    if (jumped) return narrow ? 6 : 4.5
+    return narrow ? 5 : 3.5
+  }
 
   if (!hasData) {
     return (
@@ -151,9 +173,9 @@ export default function DualLineChart({
         <div className="min-w-0">
           {extra}
           <p className="text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">{eyebrow}</p>
-          <h3 className="mt-1 text-[20px] font-semibold tracking-tight text-[var(--fnz-text)]">{title}</h3>
+          <h3 className="mt-1 text-[22px] font-semibold tracking-tight text-[var(--fnz-text)] sm:text-[20px]">{title}</h3>
         </div>
-        <div className="flex flex-wrap gap-3 text-[13px] font-medium">
+        <div className="flex flex-wrap gap-3 text-[14px] font-medium sm:text-[13px]">
           {series.map((item) => (
             <span key={item.key} className="inline-flex items-center gap-1.5" style={{ color: item.color }}>
               <span className="h-2 w-2 rounded-full" style={{ background: item.color }} />
@@ -165,21 +187,21 @@ export default function DualLineChart({
 
       {selected && (
         <div className="mt-3 rounded-2xl bg-[var(--fnz-input)] px-3 py-3">
-          <p className="text-[12px] text-[var(--fnz-muted)]">
+          <p className="text-[13px] text-[var(--fnz-muted)] sm:text-[12px]">
             {selected.label || labelFormatter(selected.key)}
           </p>
           <div className={`mt-2 grid gap-2 ${series.length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {series.map((item) => (
               <div key={item.key}>
-                <p className="text-[12px] text-[var(--fnz-muted)]">{item.label}</p>
-                <p className="mt-0.5 text-[15px] font-semibold tabular-nums" style={{ color: item.color }}>
+                <p className="text-[13px] text-[var(--fnz-muted)] sm:text-[12px]">{item.label}</p>
+                <p className="mt-0.5 text-[18px] font-semibold tabular-nums sm:text-[15px]" style={{ color: item.color }}>
                   {formatSoles(selected[item.key])}
                 </p>
               </div>
             ))}
           </div>
           {(Number(selected.increment) || 0) !== 0 && (
-            <p className="mt-2 text-[13px] leading-snug">
+            <p className="mt-2 text-[14px] leading-snug sm:text-[13px]">
               <span className={selected.increment > 0 ? 'text-[var(--fnz-success)]' : 'text-[var(--fnz-danger)]'}>
                 {selected.increment > 0 ? '+' : ''}
                 {formatSoles(selected.increment)}
@@ -192,17 +214,17 @@ export default function DualLineChart({
             </p>
           )}
           {selected.reached ? (
-            <p className="mt-2 text-[13px] font-medium text-[var(--fnz-success)]">Meta alcanzada</p>
+            <p className="mt-2 text-[14px] font-medium text-[var(--fnz-success)] sm:text-[13px]">Meta alcanzada</p>
           ) : selected.remaining != null ? (
-            <p className="mt-2 text-[13px] text-[var(--fnz-muted)]">Faltan {formatSoles(selected.remaining)}</p>
+            <p className="mt-2 text-[14px] text-[var(--fnz-muted)] sm:text-[13px]">Faltan {formatSoles(selected.remaining)}</p>
           ) : null}
         </div>
       )}
 
-      <div className="mt-2 -mx-1 overflow-x-auto">
+      <div className="mt-2 w-full overflow-hidden">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-[220px] w-full min-w-[280px]"
+          className="h-[210px] w-full max-w-full sm:h-[220px]"
           role="img"
           aria-label={title}
         >
@@ -216,7 +238,7 @@ export default function DualLineChart({
                 stroke="var(--fnz-line)"
                 strokeWidth="1"
               />
-              <text x={padL - 8} y={yFor(tick) + 4} textAnchor="end" fill="var(--fnz-muted)" fontSize="11">
+              <text x={padL - 8} y={yFor(tick) + 4} textAnchor="end" fill="var(--fnz-muted)" fontSize={fontSize}>
                 {formatAxis(tick)}
               </text>
             </g>
@@ -233,7 +255,7 @@ export default function DualLineChart({
                   d={linePath(points, xFor, yFor, item.key, pathStyle)}
                   fill="none"
                   stroke={item.color}
-                  strokeWidth={item.dashed ? 2 : 2.75}
+                  strokeWidth={item.dashed ? (narrow ? 2.4 : 2) : narrow ? 3.4 : 2.75}
                   strokeDasharray={item.dashed ? '6 6' : undefined}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -243,17 +265,19 @@ export default function DualLineChart({
           })}
 
           {points.map((point, index) => (
-            <g key={point.id || point.key}>
+            <g key={point.id || `${point.key}-${index}`}>
               {series.map((item) => {
                 const showMarkers = item.markers ?? !item.dashed
                 if (!showMarkers) return null
                 const jumped = (Number(point.increment) || 0) !== 0
+                const y = yFor(point[item.key])
+                if (!Number.isFinite(y)) return null
                 return (
                   <circle
                     key={item.key}
                     cx={xFor(index)}
-                    cy={yFor(point[item.key])}
-                    r={active === index ? 5.5 : jumped ? 4.5 : 3.5}
+                    cy={y}
+                    r={markerR(index, jumped)}
                     fill={point.reached && item.key === 'actual' ? item.color : 'var(--fnz-card)'}
                     stroke={item.color}
                     strokeWidth="2"
@@ -265,19 +289,19 @@ export default function DualLineChart({
                 y={height - 8}
                 textAnchor="middle"
                 fill={active === index ? 'var(--fnz-text)' : 'var(--fnz-muted)'}
-                fontSize="11"
+                fontSize={fontSize}
                 fontWeight={active === index ? 600 : 400}
               >
                 {active === index || point.key !== points[index - 1]?.key
-                  ? (points.length <= 8 || index === 0 || index === points.length - 1 || active === index
+                  ? (points.length <= (narrow ? 5 : 8) || index === 0 || index === points.length - 1 || active === index
                     ? labelFormatter(point.key)
                     : '')
                   : ''}
               </text>
               <rect
-                x={xFor(index) - innerW / points.length / 2}
+                x={xFor(index) - innerW / Math.max(points.length, 1) / 2}
                 y={padT}
-                width={Math.max(innerW / points.length, 24)}
+                width={Math.max(innerW / Math.max(points.length, 1), narrow ? 36 : 24)}
                 height={innerH}
                 fill="transparent"
                 className="cursor-pointer"

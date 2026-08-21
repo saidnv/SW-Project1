@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import AmountBadge from '../components/AmountBadge'
 import CloseMonthCard from '../components/CloseMonthCard'
 import Field, { inputClass } from '../components/Field'
+import LoanClaimModal from '../components/LoanClaimModal'
 import MonthHistory from '../components/MonthHistory'
 import PlasticCard from '../components/PlasticCard'
+import ReceivedLoansPanel from '../components/ReceivedLoansPanel'
 import RowMenu from '../components/RowMenu'
 import { btnPrimary, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
@@ -42,15 +44,26 @@ function PaidSwitch({ paid, onChange, tone = 'default' }) {
 }
 
 export default function PagosPage() {
-  const { account, totals, addPago, setPagoPaid, updatePago, removePago, closeMonth } = useFinanzas()
+  const { account, totals, addPago, setPagoPaid, updatePago, removePago, closeMonth, claimLoanPayment, refreshAccount } = useFinanzas()
   const period = openPeriod(account.data)
   const items = account.data.pagos.filter((item) => inPeriod(item, period))
   const deudas = account.data.deudas
+  const receivedLoans = account.data.prestamosRecibidos || []
   const pending = items.filter((item) => !isPagoPaid(item))
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
+  const [claiming, setClaiming] = useState(null)
   const amounts = items.map((item) => item.amount)
+
+  useEffect(() => {
+    refreshAccount()
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAccount()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [refreshAccount])
 
   function selectedDebtName(deudaId) {
     return deudas.find((item) => item.id === deudaId)?.name ?? ''
@@ -113,6 +126,17 @@ export default function PagosPage() {
         ready={items.length > 0 && pending.length === 0}
         onCloseMonth={closeMonth}
       />
+
+      <ReceivedLoansPanel
+        loans={receivedLoans}
+        onClaim={setClaiming}
+      />
+
+      {receivedLoans.length ? (
+        <h3 className="px-1 text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">
+          Pagos mensuales
+        </h3>
+      ) : null}
 
       <AddFormPanel
         open={formOpen}
@@ -230,6 +254,19 @@ export default function PagosPage() {
         <h3 className="mb-3 px-1 text-[13px] font-medium uppercase tracking-wide text-[var(--fnz-muted)]">Historial por mes</h3>
         <MonthHistory months={account.data.closedMonths} variant="pagos" />
       </div>
+
+      {claiming ? (
+        <LoanClaimModal
+          loan={claiming}
+          onClose={() => setClaiming(null)}
+          onConfirm={(payload) => {
+            const result = claimLoanPayment(claiming.id, payload)
+            if (!result.ok) return result
+            setClaiming(null)
+            return result
+          }}
+        />
+      ) : null}
     </section>
   )
 }

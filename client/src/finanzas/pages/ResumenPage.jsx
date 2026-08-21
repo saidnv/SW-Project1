@@ -44,7 +44,7 @@ function Stat({ label, value, to, accent, hint, hintTone }) {
 }
 
 export default function ResumenPage() {
-  const { totals, account } = useFinanzas()
+  const { totals, account, isSectionVisible } = useFinanzas()
   const remainderPositive = totals.remainder >= 0
   const afterMonthPayments = totals.remainder - totals.pagosPendientesMes
   const afterPositive = afterMonthPayments >= 0
@@ -52,6 +52,16 @@ export default function ResumenPage() {
   const prestamosTrend = useMemo(() => buildPrestamosTrend(account?.data), [account])
   const prestamos = account?.data.prestamos ?? []
   const prestamoLibre = remainingToLend(totals.prestamoDisponible, prestamos)
+  const showDeudas = isSectionVisible('deudas')
+  const showAhorros = isSectionVisible('ahorros')
+  const showPrestamos = isSectionVisible('prestamos')
+  const trendSeries = [
+    showDeudas ? { key: 'deudas', label: 'Deudas', color: 'var(--fnz-danger)' } : null,
+    showAhorros ? { key: 'ahorros', label: 'Ahorros', color: 'var(--fnz-accent)' } : null,
+  ].filter(Boolean)
+  const trendHasData = trend.points.some((point) =>
+    trendSeries.some((item) => Number(point[item.key]) > 0),
+  )
 
   return (
     <section className="space-y-4">
@@ -60,27 +70,39 @@ export default function ResumenPage() {
         subtitle={`Montos en soles (S/). ${formatMonthKey(openPeriod(account?.data))}.`}
       />
 
-      <DueSoonLoans prestamos={prestamos} />
+      {showPrestamos ? <DueSoonLoans prestamos={prestamos} /> : null}
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-        <Stat label="Líneas o créditos" value={formatSoles(totals.creditos)} to="/finanzas/creditos" />
-        <Stat label="Deudas totales" value={formatSoles(totals.deudas)} to="/finanzas/deudas" accent="text-[var(--fnz-danger)]" />
-        <Stat
-          label="Pagos del mes"
-          value={formatSoles(totals.pagosMes)}
-          to="/finanzas/pagos"
-          hint={`Por pagar ${formatSoles(totals.pagosPendientesMes)}`}
-          hintTone="bg-amber-50 text-[var(--fnz-warn)]"
-        />
-        <Stat label="Ingresos del mes" value={formatSoles(totals.ingresosMes)} to="/finanzas/ingresos" accent="text-[var(--fnz-success)]" />
-        <Stat label="Ahorros" value={formatSoles(totals.ahorros)} to="/finanzas/ahorros" accent="text-[var(--fnz-accent)]" />
-        <Stat
-          label="Para prestar"
-          value={formatSoles(prestamoLibre)}
-          to="/finanzas/prestamos"
-          hint={totals.prestamos > 0 ? `Prestado ${formatSoles(totals.prestamos)}` : 'Fondo aparte del ahorro'}
-          hintTone="bg-[var(--fnz-accent-soft)] text-[var(--fnz-accent)]"
-        />
+        {isSectionVisible('creditos') ? (
+          <Stat label="Líneas o créditos" value={formatSoles(totals.creditos)} to="/finanzas/creditos" />
+        ) : null}
+        {showDeudas ? (
+          <Stat label="Deudas totales" value={formatSoles(totals.deudas)} to="/finanzas/deudas" accent="text-[var(--fnz-danger)]" />
+        ) : null}
+        {isSectionVisible('pagos') ? (
+          <Stat
+            label="Pagos del mes"
+            value={formatSoles(totals.pagosMes)}
+            to="/finanzas/pagos"
+            hint={`Por pagar ${formatSoles(totals.pagosPendientesMes)}`}
+            hintTone="bg-amber-50 text-[var(--fnz-warn)]"
+          />
+        ) : null}
+        {isSectionVisible('ingresos') ? (
+          <Stat label="Ingresos del mes" value={formatSoles(totals.ingresosMes)} to="/finanzas/ingresos" accent="text-[var(--fnz-success)]" />
+        ) : null}
+        {showAhorros ? (
+          <Stat label="Ahorros" value={formatSoles(totals.ahorros)} to="/finanzas/ahorros" accent="text-[var(--fnz-accent)]" />
+        ) : null}
+        {showPrestamos ? (
+          <Stat
+            label="Para prestar"
+            value={formatSoles(prestamoLibre)}
+            to="/finanzas/prestamos"
+            hint={totals.prestamos > 0 ? `Prestado ${formatSoles(totals.prestamos)}` : 'Fondo aparte del ahorro'}
+            hintTone="bg-[var(--fnz-accent-soft)] text-[var(--fnz-accent)]"
+          />
+        ) : null}
         <Stat
           label="Disponible"
           value={formatSoles(totals.remainder)}
@@ -90,9 +112,13 @@ export default function ResumenPage() {
         />
       </div>
 
-      <MonthlyTrendChart points={trend.points} hasData={trend.hasData} />
-      <PrestamosTrendChart points={prestamosTrend.points} hasData={prestamosTrend.hasData} />
-      <GoalsTrendPanel goals={account?.data.ahorros ?? []} />
+      {trendSeries.length ? (
+        <MonthlyTrendChart points={trend.points} hasData={trendHasData} series={trendSeries} />
+      ) : null}
+      {showPrestamos ? (
+        <PrestamosTrendChart points={prestamosTrend.points} hasData={prestamosTrend.hasData} />
+      ) : null}
+      {showAhorros ? <GoalsTrendPanel goals={account?.data.ahorros ?? []} /> : null}
     </section>
   )
 }

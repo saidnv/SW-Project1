@@ -70,6 +70,32 @@ export function remainingToLend(disponible, prestamos) {
   return Number((pool - lent).toFixed(2))
 }
 
+export function isLinkedLoan(loan) {
+  return Boolean(loan?.linked && (loan.borrowerId || loan.borrowerUsername))
+}
+
+export function loanOwed(loan) {
+  if (isLoanCollected(loan)) return 0
+  const total = loanTotal(loan)
+  const paid = (loan.paymentHistory || []).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+  if (loan.remainingAmount != null && Number.isFinite(Number(loan.remainingAmount))) {
+    return Number(Math.max(0, Number(loan.remainingAmount)).toFixed(2))
+  }
+  return Number(Math.max(0, total - paid).toFixed(2))
+}
+
+export function loanPaidAmount(loan) {
+  return Number((loanTotal(loan) - loanOwed(loan)).toFixed(2))
+}
+
+export function pendingLoanClaim(loan) {
+  return (loan?.claims || []).find((claim) => claim.status === 'pending') || null
+}
+
+export function openReceivedLoans(list) {
+  return (list || []).filter((loan) => isLinkedLoan(loan) && !isLoanCollected(loan))
+}
+
 export function dueHeadline(loan) {
   const state = loanDueState(loan)
   const total = formatSoles(loanTotal(loan))

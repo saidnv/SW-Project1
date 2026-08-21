@@ -11,7 +11,7 @@ function ModalShell({ children }) {
   )
 }
 
-function UserPicker({ users, selectedIds, onToggle, emptyText }) {
+export function UserPicker({ users, selectedIds, onToggle, emptyText }) {
   if (!users.length) {
     return <p className="mt-4 text-[15px] leading-relaxed text-[var(--fnz-muted)]">{emptyText}</p>
   }

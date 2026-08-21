@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useFinanzas } from './context/FinanzasContext'
 import { useTheme } from './context/ThemeContext'
 import KabinPanel from './components/KabinPanel'
@@ -14,13 +14,84 @@ const NAV = [
   { to: '/finanzas/pagos', label: 'Pagos mensuales', shortLabel: 'Pagos', section: 'pagos' },
   { to: '/finanzas/ingresos', label: 'Sueldo e ingresos', shortLabel: 'Ingresos', section: 'ingresos' },
   { to: '/finanzas/ahorros', label: 'Ahorros', shortLabel: 'Ahorros', section: 'ahorros' },
-  { to: '/finanzas/prestamos', label: "Préstamos Bésame m'de", shortLabel: 'Préstamos', section: 'prestamos' },
+  { to: '/finanzas/prestamos', label: 'Préstamos', shortLabel: 'Préstamos', section: 'prestamos' },
 ]
 
 function sectionFromPath(pathname) {
   const found = NAV.find((item) => item.to !== '/finanzas' && pathname.startsWith(item.to))
   if (pathname.startsWith('/finanzas/ajustes')) return 'ajustes'
   return found?.section ?? 'resumen'
+}
+
+function NavIcon({ section }) {
+  const common = {
+    viewBox: '0 0 24 24',
+    className: 'h-4 w-4 shrink-0',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.8',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  }
+  if (section === 'resumen') {
+    return (
+      <svg {...common}>
+        <path d="M4 19V10M10 19V5M16 19v-6M22 19V8" />
+      </svg>
+    )
+  }
+  if (section === 'creditos') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="6" width="18" height="12" rx="2.2" />
+        <path d="M3 10h18" />
+      </svg>
+    )
+  }
+  if (section === 'deudas') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8.2" />
+        <path d="M8.5 12h7" />
+      </svg>
+    )
+  }
+  if (section === 'pagos') {
+    return (
+      <svg {...common}>
+        <path d="M7 4.5h10a2 2 0 0 1 2 2V18a1.5 1.5 0 0 1-1.5 1.5H7.5A1.5 1.5 0 0 1 6 18V6.5a2 2 0 0 1 2-2Z" />
+        <path d="M9 10h6M9 13.5h4" />
+      </svg>
+    )
+  }
+  if (section === 'ingresos') {
+    return (
+      <svg {...common}>
+        <path d="M12 16V7" />
+        <path d="M8 10.5 12 6.5l4 4" />
+        <path d="M5 18h14" />
+      </svg>
+    )
+  }
+  if (section === 'ahorros') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8.2" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    )
+  }
+  if (section === 'prestamos') {
+    return (
+      <svg {...common}>
+        <circle cx="8" cy="12" r="2.4" />
+        <path d="M4.2 17.2c.8-1.8 2.2-2.7 3.8-2.7s3 .9 3.8 2.7" />
+        <path d="M14 10h6.2" />
+        <path d="M17.8 7.2 21 10l-3.2 2.8" />
+      </svg>
+    )
+  }
+  return null
 }
 
 function SettingsIcon() {
@@ -71,10 +142,10 @@ function AppBrand({ initial, kitty, account }) {
   )
 }
 
-function SidebarNav() {
+function SidebarNav({ items }) {
   return (
     <nav className="overflow-hidden rounded-[22px] bg-[var(--fnz-card)] shadow-[var(--fnz-shadow)]">
-      {NAV.map((item, index) => (
+      {items.map((item, index) => (
         <NavLink
           key={item.to}
           to={item.to}
@@ -87,7 +158,10 @@ function SidebarNav() {
             }`
           }
         >
-          {item.label}
+          <span className="flex min-w-0 items-center gap-2.5">
+            <NavIcon section={item.section} />
+            <span className="truncate">{item.label}</span>
+          </span>
           <span className="text-[18px] text-[var(--fnz-muted)]">›</span>
         </NavLink>
       ))}
@@ -95,22 +169,23 @@ function SidebarNav() {
   )
 }
 
-function MobileNav() {
+function MobileNav({ items }) {
   return (
     <nav className="fnz-scroll-x flex gap-2 pb-1">
-      {NAV.map((item) => (
+      {items.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.end}
           className={({ isActive }) =>
-            `shrink-0 rounded-full px-3.5 py-2 text-[14px] font-medium whitespace-nowrap transition ${
+            `inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-[14px] font-medium whitespace-nowrap transition ${
               isActive
                 ? 'bg-[var(--fnz-accent)] text-white shadow-[var(--fnz-btn-shadow)]'
                 : 'bg-[var(--fnz-card)] text-[var(--fnz-text)] shadow-[var(--fnz-shadow)]'
             }`
           }
         >
+          <NavIcon section={item.section} />
           {item.shortLabel}
         </NavLink>
       ))}
@@ -163,17 +238,40 @@ function MobileMenu({ kitty, onClose, onLogout }) {
 }
 
 export default function FinanzasLayout() {
-  const { loggedIn, account, logout, ready } = useFinanzas()
+  const { loggedIn, account, logout, ready, isSectionVisible } = useFinanzas()
   const { theme } = useTheme()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const section = sectionFromPath(location.pathname)
+  const navItems = NAV.filter((item) => item.section === 'resumen' || isSectionVisible(item.section))
   const initial = (account?.username || 'K').slice(0, 1).toUpperCase()
   const kitty = theme === 'kitty'
 
   useEffect(() => {
     setMenuOpen(false)
   }, [location.pathname])
+
+  useEffect(() => {
+    const titles = {
+      resumen: 'Resumen',
+      creditos: 'Créditos',
+      deudas: 'Deudas',
+      pagos: 'Pagos',
+      ingresos: 'Ingresos',
+      ahorros: 'Ahorros',
+      prestamos: 'Préstamos',
+      ajustes: 'Ajustes',
+    }
+    const previousTitle = document.title
+    const icon = document.querySelector('link[rel="icon"]')
+    const previousIcon = icon?.getAttribute('href')
+    document.title = `${titles[section] || 'Finanzas'} · Finanzas`
+    icon?.setAttribute('href', '/finanzas/favicon.svg')
+    return () => {
+      document.title = previousTitle
+      if (icon && previousIcon) icon.setAttribute('href', previousIcon)
+    }
+  }, [section])
 
   if (!ready) {
     return (
@@ -194,6 +292,10 @@ export default function FinanzasLayout() {
         <AuthScreen />
       </div>
     )
+  }
+
+  if (section !== 'resumen' && section !== 'ajustes' && !isSectionVisible(section)) {
+    return <Navigate to="/finanzas" replace />
   }
 
   return (
@@ -238,7 +340,7 @@ export default function FinanzasLayout() {
               </button>
             </div>
           </div>
-          <MobileNav />
+          <MobileNav items={navItems} />
           {menuOpen && <MobileMenu kitty={kitty} onClose={() => setMenuOpen(false)} onLogout={logout} />}
         </div>
 
@@ -257,7 +359,7 @@ export default function FinanzasLayout() {
               )}
             </Link>
           </div>
-          <SidebarNav />
+          <SidebarNav items={navItems} />
           <div className="flex flex-col gap-3 px-1">
             <Link to="/finanzas/ajustes" className="text-[15px] font-medium text-[var(--fnz-accent)]">
               Ajustes y temas

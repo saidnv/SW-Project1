@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AddFormPanel from '../components/AddFormPanel'
 import CollectLoanModal from '../components/CollectLoanModal'
 import DeleteLoanModal from '../components/DeleteLoanModal'
 import Field, { inputClass } from '../components/Field'
 import IosDateField from '../components/IosDateField'
+import ProgressBar from '../components/ProgressBar'
 import RowMenu from '../components/RowMenu'
-import { btnPrimary, btnSecondary, card, empty, PageHeader } from '../components/ui'
+import { btnDanger, btnPrimary, btnSecondary, btnText, card, empty, PageHeader } from '../components/ui'
 import { useFinanzas } from '../context/FinanzasContext'
 import { formatDate, formatDay, todayInputValue } from '../lib/dates'
 import { formatSoles, parseAmount } from '../lib/money'
-import { isLoanCollected, loanDueState, loanInterestAmount, loanTotal, poolAfterRemovingLoan, remainingToLend } from '../lib/prestamos'
+import { samePerson } from '../lib/sharedAhorro'
+import { isLinkedLoan, isLoanCollected, loanDueState, loanInterestAmount, loanOwed, loanPaidAmount, loanTotal, pendingLoanClaim, poolAfterRemovingLoan, remainingToLend } from '../lib/prestamos'
 
 const emptyForm = {
   name: '',
@@ -18,6 +20,8 @@ const emptyForm = {
   dueDate: '',
   notes: '',
   image: '',
+  linkKind: 'external',
+  borrowerId: '',
 }
 
 const textareaClass = `${inputClass} min-h-[92px] resize-y`
@@ -47,7 +51,17 @@ function dueBadgeClass(key) {
 }
 
 export default function PrestamosPage() {
-  const { account, addPrestamo, updatePrestamo, removePrestamo, collectPrestamo, setPrestamoDisponible } = useFinanzas()
+  const {
+    account,
+    addPrestamo,
+    updatePrestamo,
+    removePrestamo,
+    collectPrestamo,
+    reviewLoanClaim,
+    setPrestamoDisponible,
+    listDirectory,
+    refreshAccount,
+  } = useFinanzas()
   const items = account.data.prestamos || []
   const pool = Number(account.data.prestamoDisponible) || 0
   const leftover = remainingToLend(pool, items)
@@ -59,6 +73,21 @@ export default function PrestamosPage() {
   const [error, setError] = useState('')
   const [collecting, setCollecting] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [directory, setDirectory] = useState([])
+
+  useEffect(() => {
+    listDirectory()
+      .then(setDirectory)
+      .catch(() => setDirectory([]))
+    refreshAccount()
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAccount()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [listDirectory, refreshAccount])
+
+  const otherUsers = directory.filter((user) => !samePerson(user, account))
 
   function closeForm() {
     setFormOpen(false)
@@ -75,10 +104,16 @@ export default function PrestamosPage() {
   function submit(event) {
     event.preventDefault()
     setError('')
-    const name = form.name.trim()
+    const linked = !editingId && form.linkKind === 'user'
+    const borrower = linked ? otherUsers.find((user) => user.id === form.borrowerId) : null
+    const name = linked ? borrower?.username || '' : form.name.trim()
     const amount = parseAmount(form.amount)
     const interest = parseAmount(form.interest)
     const dueDate = form.dueDate
+    if (linked && !borrower) {
+      setError('Selecciona un usuario del sistema.')
+      return
+    }
     if (!name || amount <= 0 || !dueDate) {
       setError('Completa el nombre, el monto y la fecha de vencimiento.')
       return
@@ -99,7 +134,7 @@ export default function PrestamosPage() {
       image: form.image,
     }
     if (editingId) updatePrestamo(editingId, payload)
-    else addPrestamo(payload)
+    else addPrestamo({ ...payload, linked, borrower })
     closeForm()
   }
 
@@ -112,6 +147,8 @@ export default function PrestamosPage() {
       dueDate: item.dueDate || '',
       notes: item.notes || '',
       image: item.image || '',
+      linkKind: isLinkedLoan(item) ? 'user' : 'external',
+      borrowerId: item.borrowerId || '',
     })
     setFormOpen(true)
     setPoolOpen(false)
@@ -135,8 +172,8 @@ export default function PrestamosPage() {
   return (
     <section className="space-y-5">
       <PageHeader
-        title="Préstamos Bésame m'de"
-        subtitle="Dinero que prestas a otras personas. El fondo para prestar es independiente del ahorro."
+        title="Préstamos"
+        subtitle="Dinero que prestas. Si vinculas a un usuario del sistema, esa persona lo verá en Pagos hasta que confirmes el cobro."
       />
 
       <div className="grid grid-cols-2 gap-2">
@@ -227,14 +264,61 @@ export default function PrestamosPage() {
           onClose={closeForm}
         >
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
-          <Field label="Nombre a quien se le presta">
-            <input
-              className={inputClass}
-              placeholder="Nombre de la persona"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </Field>
+          {!editingId ? (
+            <div className="space-y-2 sm:col-span-2">
+              <p className="text-[13px] font-medium text-[var(--fnz-muted)]">¿A quién le prestas?</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, linkKind: 'external', borrowerId: '' })}
+                  className={form.linkKind === 'external' ? btnPrimary : btnSecondary}
+                >
+                  Persona externa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, linkKind: 'user', name: '' })}
+                  className={form.linkKind === 'user' ? btnPrimary : btnSecondary}
+                >
+                  Usuario del sistema
+                </button>
+              </div>
+              <p className="text-[13px] text-[var(--fnz-muted)]">
+                Si es un usuario de aquí, verá la deuda en Pagos y tú confirmarás cuando pague.
+              </p>
+            </div>
+          ) : null}
+          {form.linkKind === 'user' && !editingId ? (
+            <div className="sm:col-span-2">
+              <Field label="Usuario">
+                <select
+                  className={inputClass}
+                  value={form.borrowerId}
+                  onChange={(e) => setForm({ ...form, borrowerId: e.target.value })}
+                >
+                  <option value="">Selecciona un usuario</option>
+                  {otherUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.username}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {!otherUsers.length ? (
+                <p className="mt-2 text-[13px] text-[var(--fnz-muted)]">No hay otras cuentas para vincular.</p>
+              ) : null}
+            </div>
+          ) : (
+            <Field label="Nombre a quien se le presta">
+              <input
+                className={inputClass}
+                placeholder="Nombre de la persona"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                disabled={Boolean(editingId && form.linkKind === 'user')}
+              />
+            </Field>
+          )}
           <Field label="Monto (S/)">
             <input
               className={inputClass}
@@ -308,6 +392,12 @@ export default function PrestamosPage() {
           const collected = isLoanCollected(item)
           const due = loanDueState(item)
           const interest = loanInterestAmount(item)
+          const linked = isLinkedLoan(item)
+          const pending = pendingLoanClaim(item)
+          const owed = loanOwed(item)
+          const paid = loanPaidAmount(item)
+          const total = loanTotal(item)
+          const pct = total > 0 ? (paid / total) * 100 : 0
           return (
             <li key={item.id} className={card}>
               <div className="flex gap-4">
@@ -316,26 +406,76 @@ export default function PrestamosPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-[17px] font-semibold text-[var(--fnz-text)]">{item.name}</p>
-                      <span className={`mt-1.5 inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${dueBadgeClass(due.key)}`}>
-                        {due.label}
-                      </span>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${dueBadgeClass(due.key)}`}>
+                          {due.label}
+                        </span>
+                        {linked ? (
+                          <span className="inline-flex rounded-full bg-[var(--fnz-accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--fnz-accent)]">
+                            Usuario · {item.borrowerUsername}
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-[var(--fnz-input)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--fnz-muted)]">
+                            Externo
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <RowMenu onEdit={() => startEdit(item)} onDelete={() => setDeleting(item)} />
                   </div>
-                  <p className="mt-2 text-[22px] font-bold tabular-nums text-[var(--fnz-accent)]">{formatSoles(item.amount)}</p>
+                  <p className="mt-2 text-[22px] font-bold tabular-nums text-[var(--fnz-accent)]">
+                    {linked && !collected ? formatSoles(owed) : formatSoles(item.amount)}
+                    {linked && !collected ? (
+                      <span className="text-[15px] font-medium text-[var(--fnz-muted)]"> de {formatSoles(total)}</span>
+                    ) : null}
+                  </p>
                   <p className="text-[13px] text-[var(--fnz-muted)]">
                     Interés {item.interest || 0}%{interest > 0 ? ` (${formatSoles(interest)})` : ''} · A cobrar {formatSoles(item.collectedAmount || loanTotal(item))}
                   </p>
                   <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">Hasta el {formatDay(item.dueDate)}</p>
+                  {linked && !collected && total > 0 ? (
+                    <div className="mt-3">
+                      <ProgressBar value={pct} label={`Pagado ${formatSoles(paid)}`} />
+                    </div>
+                  ) : null}
                   {collected ? (
                     <p className="mt-2 text-[14px] font-medium text-[var(--fnz-success)]">
                       Cobró {item.collector} · {formatDate(item.collectedAt)}
                     </p>
                   ) : null}
                   {item.notes ? <p className="mt-2 text-[14px] leading-relaxed text-[var(--fnz-text)]">{item.notes}</p> : null}
-                  {!collected ? (
+                  {pending && !collected ? (
+                    <div className="mt-4 rounded-2xl bg-[var(--fnz-input)] p-3">
+                      <p className="text-[14px] font-medium text-[var(--fnz-text)]">
+                        {item.borrowerUsername} indicó un pago de {formatSoles(pending.amount)}.
+                      </p>
+                      {pending.note ? <p className="mt-1 text-[13px] text-[var(--fnz-muted)]">{pending.note}</p> : null}
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          className={btnPrimary}
+                          onClick={() => reviewLoanClaim(item.id, pending.id, true)}
+                        >
+                          Confirmar pago
+                        </button>
+                        <button
+                          type="button"
+                          className={btnDanger}
+                          onClick={() => reviewLoanClaim(item.id, pending.id, false)}
+                        >
+                          Rechazar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {!collected && !linked ? (
                     <button type="button" onClick={() => setCollecting(item)} className={`${btnPrimary} mt-4 w-full sm:w-auto`}>
                       Cobrado
+                    </button>
+                  ) : null}
+                  {!collected && linked && !pending ? (
+                    <button type="button" onClick={() => setCollecting(item)} className={`${btnText} mt-4`}>
+                      Marcar cobrado sin aviso
                     </button>
                   ) : null}
                 </div>

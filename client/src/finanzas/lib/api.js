@@ -82,7 +82,7 @@ export function isLedgerEmpty(data) {
   if (!data) return true
   if (Array.isArray(data.closedMonths) && data.closedMonths.length) return false
   if (Number(data.prestamoDisponible) > 0) return false
-  return ['creditos', 'deudas', 'pagos', 'ingresos', 'ahorros', 'prestamos'].every(
+  return ['creditos', 'deudas', 'pagos', 'ingresos', 'ahorros', 'prestamos', 'prestamosRecibidos'].every(
     (key) => !Array.isArray(data[key]) || data[key].length === 0,
   )
 }

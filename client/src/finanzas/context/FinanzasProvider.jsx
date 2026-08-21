@@ -6,8 +6,8 @@ import { getKabinAdvice } from '../lib/kabin'
 import { sumAmounts } from '../lib/money'
 import { isPagoPaid, paidPagos } from '../lib/pagos'
 import { hydrateLedger, inPeriod, openPeriod } from '../lib/period'
+import { HIDEABLE_IDS, normalizeHiddenSections } from '../lib/sections'
 import { isTarjeta, kindOf } from '../lib/kinds'
-import { loanInterestAmount, loanTotal, openLoans, poolAfterRemovingLoan } from '../lib/prestamos'
 import {
   clearApiToken,
   fetchAdminAccounts,
@@ -36,6 +36,8 @@ import {
   syncSharedAhorrosInStore,
   withAddedMembers,
 } from '../lib/sharedAhorro'
+import { applyLinkedLoanDeletions, makeLinkedLoan, syncLinkedLoansInStore } from '../lib/linkedLoans'
+import { isLinkedLoan, loanInterestAmount, loanOwed, loanTotal, openLoans, pendingLoanClaim, poolAfterRemovingLoan } from '../lib/prestamos'
 import { FinanzasContext } from './FinanzasContext'
 
 function withHydrated(account) {
@@ -214,8 +216,10 @@ export default function FinanzasProvider({ children }) {
   const usingApiRef = useRef(false)
   const saveQueue = useRef(Promise.resolve())
   const pendingCloseRef = useRef(false)
+  const mutationGen = useRef(0)
 
   const persist = useCallback((nextStore, nextSessionId = sessionId) => {
+    mutationGen.current += 1
     setStore(nextStore)
     setSessionId(nextSessionId)
     saveSessionId(nextSessionId)
@@ -251,6 +255,8 @@ export default function FinanzasProvider({ children }) {
       if (!usingApiRef.current) {
         nextStore = syncSharedAhorrosInStore(nextStore, account.id)
         nextStore = applySharedDeletions(nextStore, account.id, current.ahorros)
+        nextStore = syncLinkedLoansInStore(nextStore, account.id)
+        nextStore = applyLinkedLoanDeletions(nextStore, account.id, current.prestamos)
       }
       persist(nextStore)
       return next
@@ -704,10 +710,10 @@ export default function FinanzasProvider({ children }) {
   )
 
   const addAhorro = useCallback(
-    ({ name, amount, goalAmount, monthlyTarget, image, link }) => {
+    ({ name, amount, goalAmount, monthlyTarget, image, link, shared = false, members = [] }) => {
       const createdAt = nowIso()
       const byUsername = account?.username || ''
-      const item = {
+      let item = {
         id: createId(),
         name,
         amount,
@@ -719,6 +725,9 @@ export default function FinanzasProvider({ children }) {
         history: amount > 0 ? [makeAhorroDeposit(amount, 'Monto inicial', createdAt, byUsername)] : [],
         createdAt,
         updatedAt: createdAt,
+      }
+      if (shared && account) {
+        item = withAddedMembers(makeSharedAhorro(item, account), members)
       }
       updateLedger((ledger) => ({ ...ledger, ahorros: [item, ...ledger.ahorros] }))
       return item
@@ -852,8 +861,9 @@ export default function FinanzasProvider({ children }) {
   )
 
   const addPrestamo = useCallback(
-    ({ name, amount, interest, image, dueDate, notes }) => {
-      const item = {
+    ({ name, amount, interest, image, dueDate, notes, linked = false, borrower = null }) => {
+      const createdAt = nowIso()
+      let item = {
         id: createId(),
         name,
         amount,
@@ -861,15 +871,21 @@ export default function FinanzasProvider({ children }) {
         image: image || '',
         dueDate: dueDate || '',
         notes: notes || '',
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
+        remainingAmount: Number((amount + ((amount * (interest || 0)) / 100)).toFixed(2)),
+        claims: [],
+        paymentHistory: [],
+        createdAt,
+        updatedAt: createdAt,
+      }
+      if (linked && account && borrower) {
+        item = makeLinkedLoan(item, account, borrower)
       }
       updateLedger((ledger) => ({
         ...ledger,
         prestamos: [item, ...(ledger.prestamos || [])],
       }))
     },
-    [updateLedger],
+    [account, updateLedger],
   )
 
   const updatePrestamo = useCallback(
@@ -922,7 +938,13 @@ export default function FinanzasProvider({ children }) {
                   collector: name,
                   collectedAt: nowIso(),
                   collectedAmount,
+                  remainingAmount: 0,
                   poolDelta,
+                  claims: (item.claims || []).map((claim) =>
+                    claim.status === 'pending'
+                      ? { ...claim, status: 'confirmed', reviewedAt: nowIso() }
+                      : claim,
+                  ),
                   updatedAt: nowIso(),
                 }
               : item,
@@ -932,6 +954,116 @@ export default function FinanzasProvider({ children }) {
       return { ok: true }
     },
     [updateLedger],
+  )
+
+  const claimLoanPayment = useCallback(
+    (id, { amount, note }) => {
+      const pay = Number(amount) || 0
+      if (pay <= 0) return { ok: false, error: 'Indica un monto mayor a 0.' }
+      let result = { ok: true }
+      updateLedger((ledger) => {
+        const current = (ledger.prestamosRecibidos || []).find((item) => item.id === id)
+        if (!current || current.collected) {
+          result = { ok: false, error: 'No encontramos esa deuda.' }
+          return ledger
+        }
+        if (pendingLoanClaim(current)) {
+          result = { ok: false, error: 'Ya hay un pago en espera de confirmación.' }
+          return ledger
+        }
+        const owed = loanOwed(current)
+        if (pay - owed > 0.009) {
+          result = { ok: false, error: `El máximo a registrar es ${owed.toFixed(2)}.` }
+          return ledger
+        }
+        const claim = {
+          id: createId(),
+          amount: Number(pay.toFixed(2)),
+          note: String(note || '').trim(),
+          status: 'pending',
+          createdAt: nowIso(),
+          createdBy: account?.username || '',
+        }
+        return {
+          ...ledger,
+          prestamosRecibidos: ledger.prestamosRecibidos.map((item) =>
+            item.id === id
+              ? { ...item, claims: [...(item.claims || []), claim], updatedAt: nowIso() }
+              : item,
+          ),
+        }
+      })
+      return result
+    },
+    [account, updateLedger],
+  )
+
+  const reviewLoanClaim = useCallback(
+    (id, claimId, accepted) => {
+      updateLedger((ledger) => {
+        const current = (ledger.prestamos || []).find((item) => item.id === id)
+        if (!current || !isLinkedLoan(current)) return ledger
+        const claim = (current.claims || []).find((row) => row.id === claimId)
+        if (!claim || claim.status !== 'pending') return ledger
+        const reviewedAt = nowIso()
+        const claims = current.claims.map((row) =>
+          row.id === claimId
+            ? { ...row, status: accepted ? 'confirmed' : 'rejected', reviewedAt }
+            : row,
+        )
+        if (!accepted) {
+          return {
+            ...ledger,
+            prestamos: ledger.prestamos.map((item) =>
+              item.id === id ? { ...item, claims, updatedAt: reviewedAt } : item,
+            ),
+          }
+        }
+        const paid = Number(claim.amount) || 0
+        const nextRemaining = Number(Math.max(0, loanOwed(current) - paid).toFixed(2))
+        const history = [
+          ...(current.paymentHistory || []),
+          {
+            id: claim.id,
+            amount: paid,
+            date: reviewedAt,
+            note: claim.note || '',
+            confirmedBy: account?.username || '',
+          },
+        ]
+        const closed = nextRemaining <= 0.009
+        let nextPool = Number(ledger.prestamoDisponible) || 0
+        let poolDelta = current.poolDelta
+        if (closed && !current.collected) {
+          const collectedAmount = loanTotal(current)
+          const interest = loanInterestAmount(current)
+          poolDelta = nextPool > 0 ? interest : collectedAmount
+          nextPool = Number((nextPool + poolDelta).toFixed(2))
+        }
+        return {
+          ...ledger,
+          prestamoDisponible: nextPool,
+          prestamos: ledger.prestamos.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  claims,
+                  paymentHistory: history,
+                  remainingAmount: nextRemaining,
+                  collected: closed,
+                  collector: closed ? account?.username || claim.createdBy : item.collector,
+                  collectedAt: closed ? reviewedAt : item.collectedAt,
+                  collectedAmount: closed ? loanTotal(current) : item.collectedAmount,
+                  poolDelta: closed ? poolDelta : item.poolDelta,
+                  updatedAt: reviewedAt,
+                }
+              : item,
+          ),
+        }
+      })
+      return { ok: true }
+    },
+    [account, updateLedger],
   )
 
   const setPrestamoDisponible = useCallback(
@@ -996,8 +1128,12 @@ export default function FinanzasProvider({ children }) {
 
   const refreshAccount = useCallback(async () => {
     if (!usingApiRef.current) return
+    const gen = mutationGen.current
     try {
+      await saveQueue.current
+      if (gen !== mutationGen.current) return
       const payload = await fetchMe()
+      if (gen !== mutationGen.current) return
       const next = withHydrated(payload.account)
       setStore({ accounts: [next] })
       setSessionId(next.id)
@@ -1026,6 +1162,28 @@ export default function FinanzasProvider({ children }) {
       return { ok: true }
     },
     [persist, sessionId, store.accounts],
+  )
+
+  const hiddenSections = useMemo(
+    () => normalizeHiddenSections(account?.data?.hiddenSections),
+    [account],
+  )
+
+  const isSectionVisible = useCallback(
+    (id) => !hiddenSections.includes(id),
+    [hiddenSections],
+  )
+
+  const setSectionHidden = useCallback(
+    (id, hidden) => {
+      if (!HIDEABLE_IDS.includes(id)) return
+      updateLedger((ledger) => {
+        const current = normalizeHiddenSections(ledger.hiddenSections)
+        const next = hidden ? [...new Set([...current, id])] : current.filter((item) => item !== id)
+        return { ...ledger, hiddenSections: next }
+      })
+    },
+    [updateLedger],
   )
 
   const closeMonth = useCallback(() => {
@@ -1111,6 +1269,8 @@ export default function FinanzasProvider({ children }) {
     updatePrestamo,
     removePrestamo,
     collectPrestamo,
+    claimLoanPayment,
+    reviewLoanClaim,
     setPrestamoDisponible,
     allocateSurplus,
     dismissSurplus,
@@ -1119,6 +1279,9 @@ export default function FinanzasProvider({ children }) {
     listDirectory,
     refreshAccount,
     deleteUser,
+    hiddenSections,
+    isSectionVisible,
+    setSectionHidden,
   }
 
   return <FinanzasContext.Provider value={value}>{children}</FinanzasContext.Provider>
